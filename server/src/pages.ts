@@ -47,6 +47,8 @@ export class Pages {
   }
 
   get(actor: Actor, pageId: string, write = false, includeTrash = false): StoredPage {
+    const currentUser=this.s.get('users',actor.user.id);
+    if(!currentUser||currentUser.disabled)fail(401,'Please sign in to continue.');
     const page = this.s.get<StoredPage>('pages', pageId);
     if (!page || (actor.workspaceId && actor.workspaceId !== page.workspaceId)) return fail(404, 'Page not found.');
     const member = this.s.db.prepare('SELECT role FROM memberships WHERE workspaceId=? AND userId=?')
@@ -67,6 +69,8 @@ export class Pages {
   row(page: Page): Row {
     return {
       id: page.id, title: page.title, icon: page.icon, props: page.props, position: page.position,
+      cover: page.cover || firstImage(page.content), preview: docToPlainText(page.content).slice(0, 200),
+      createdBy: page.createdBy, createdByName: this.s.get('users', page.createdBy)?.name ?? 'Former member', updatedByType: page.updatedByType ?? 'user',
       hasContent: !!page.content?.content?.length, createdAt: page.createdAt, updatedAt: page.updatedAt,
     };
   }
@@ -95,24 +99,7 @@ export class Pages {
     return (siblings[index].position + (siblings[index + 1]?.position ?? siblings[index].position + 2)) / 2;
   }
 
-  index(page: Page): void {
-    // Index what a person would read: option names instead of ids, and no user or row ids.
-    const propertyText: string[] = [];
-    const schema = page.kind === 'row' && page.parentId ? this.s.get<Page>('pages', page.parentId)?.schema ?? [] : [];
-    for (const property of schema) {
-      const value = page.props[property.id];
-      if (value === null || value === undefined || property.type === 'person' || property.type === 'relation' || property.type === 'checkbox') continue;
-      for (const item of Array.isArray(value) ? value : [value]) {
-        if (property.options) {
-          const option = property.options.find(option => option.id === item);
-          if (option) propertyText.push(option.name);
-        } else propertyText.push(String(item));
-      }
-    }
-    this.s.db.prepare('DELETE FROM search WHERE id=?').run(page.id);
-    this.s.db.prepare('INSERT INTO search(id,title,body) VALUES(?,?,?)').run(
-      page.id, page.title, docToPlainText(page.content) + ' ' + propertyText.join(' '));
-  }
+  index(page: Page): void { this.s.indexPage(page); }
 
   change(actor: Actor, page: Page, action: PageChange): StoredPage {
     page.updatedAt = now();
@@ -160,7 +147,7 @@ export class Pages {
     }
     const at = now();
     const page: Page = {
-      id: id(), workspaceId, parentId, kind, title: input.title ?? 'Untitled', icon: input.icon ?? '',
+      id: id(), workspaceId, parentId, kind, title: input.title ?? '', icon: input.icon ?? '',
       cover: input.cover ?? '', visibility: input.visibility ?? 'workspace', content: input.content ?? null,
       props: kind === 'row' ? input.props ?? {} : {}, schema: kind === 'database' ? schema : [],
       views: kind === 'database' ? views : [], position: this.position(actor, workspaceId, parentId, input.afterId),
@@ -295,7 +282,7 @@ export class Pages {
       for (const version of this.s.all<StoredVersion>('versions').reverse().filter(version => version.pageId === page.id))
         this.s.remove('versions', version.id);
     }
-    for (const table of ['invites', 'activity', 'files', 'tokens'] as const) {
+    for (const table of ['invites', 'activity', 'files', 'tokens', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthGrants'] as const) {
       for (const value of this.s.all<{ id: string; workspaceId: string }>(table).filter(value => value.workspaceId === workspaceId)) {
         if (table === 'files') {
           try { unlinkSync(join(this.s.dataDir, 'files', value.id)); }
@@ -318,3 +305,5 @@ export function publicPage(pages: Pages, token: string): StoredPage {
   if (!page || [...pages.ancestors(page), page].some(ancestor => ancestor.deletedAt)) return fail(404, 'Shared page not found.');
   return page;
 }
+
+function firstImage(node: DocNode | null): string { if (!node) return ''; if (node.type === 'image') return String(node.attrs?.src ?? ''); for (const child of node.content ?? []) { const src = firstImage(child); if (src) return src; } return ''; }

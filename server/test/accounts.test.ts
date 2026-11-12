@@ -20,7 +20,7 @@ describe('accounts and workspace administration',()=>{
     expect((await (await req('GET','/api/bootstrap')).json()).instance.needsSetup).toBe(true);
     const first=await signup();cookie=first.cookie;
     expect(first.r.status).toBe(200);expect(first.result.user.isAdmin).toBe(true);expect(first.result.workspaces[0].role).toBe('owner');
-    expect(Object.keys(first.result.user).sort()).toEqual(['id','email','name','color','isAdmin','disabled','createdAt','lastSeenAt'].sort());
+    expect(Object.keys(first.result.user).sort()).toEqual(['id','email','name','color','isAdmin','disabled','createdAt','lastSeenAt','prefs'].sort());
     expect((await req('POST','/api/auth/signup',{email:'blocked@example.com',name:'Blocked',password:'password123'},'')).status).toBe(403);
     expect((await req('POST','/api/auth/logout')).status).toBe(200);
     expect((await (await req('GET','/api/bootstrap')).json()).user).toBeNull();

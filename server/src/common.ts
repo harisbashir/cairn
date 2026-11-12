@@ -35,6 +35,8 @@ export interface Membership {
   joinedAt: string;
 }
 export function membership(s: Store, actor: Actor, wid: string, write = false, manage = false): Membership {
+  const currentUser=s.get('users',actor.user.id);
+  if(!currentUser||currentUser.disabled)fail(401,'Please sign in to continue.');
   if (actor.workspaceId && actor.workspaceId !== wid) {
     fail(403, 'This token is limited to another workspace.');
   }
@@ -51,9 +53,9 @@ export function membership(s: Store, actor: Actor, wid: string, write = false, m
 
 export function publicUser(user: User & { passwordHash?: string; salt?: string }): User {
   const { passwordHash, salt, ...value } = user;
-  return value;
+  return { ...value, prefs: Object.assign({ theme: 'system', accent: 'blue' }, value.prefs) };
 }
 
 export function publicUrl(c: Context, path = ''): string {
-  return (process.env.CAIRN_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/+$/, '') + path;
+  return (process.env.CAIRN_PUBLIC_URL ?? ((c.req.header('X-Forwarded-Proto') ?? new URL(c.req.url).protocol.slice(0,-1)) + '://' + (c.req.header('X-Forwarded-Host') ?? new URL(c.req.url).host))).replace(/\/+$/, '') + path;
 }

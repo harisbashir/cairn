@@ -41,7 +41,7 @@ export function registerPages(app: Hono<Env>, pages: Pages): void {
       })),
       favorite: page.favoriteUsers?.includes(actor.user.id) ?? false,
       shareToken: page.shareToken ?? null,
-      canEdit: member.role !== 'viewer',
+      canEdit: member.role !== 'viewer' && actor.access !== 'read',
       ...(page.kind === 'row' ? { parentSchema: pages.s.get<Page>('pages', page.parentId!)?.schema ?? [] } : {}),
     });
   });

@@ -93,15 +93,33 @@ function suggest(kind: 'slash' | 'page', char: string, bridge: { current: Bridge
   });
 }
 
+async function uploadImage(wid: string, file: File): Promise<string | null> {
+  const fd = new FormData(); fd.append('file', file, file.name || 'pasted-image.png');
+  try { return (await post<{ url: string }>(`/api/workspaces/${wid}/files`, fd)).url; } catch { return null; }
+}
+
+/** Uploads pasted or dropped images (screenshots included) and inserts them where the cursor is. */
+function insertImages(editor: TEditor, wid: string, files: File[], pos?: number): boolean {
+  const images = files.filter((f) => f.type.startsWith('image/'));
+  if (!images.length) return false;
+  void (async () => {
+    for (const file of images) {
+      const url = await uploadImage(wid, file);
+      if (!url) { window.dispatchEvent(new CustomEvent('cairn:toast', { detail: 'That image couldn’t be uploaded.' })); continue; }
+      if (pos !== undefined) editor.chain().focus().insertContentAt(pos, { type: 'image', attrs: { src: url } }).run();
+      else editor.chain().focus().setImage({ src: url }).run();
+    }
+  })();
+  return true;
+}
+
 function pickImage(wid: string): Promise<string | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'image/*';
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file) return resolve(null);
-      const fd = new FormData(); fd.append('file', file);
-      try { resolve((await post<{ url: string }>(`/api/workspaces/${wid}/files`, fd)).url); } catch { resolve(null); }
+      resolve(file ? await uploadImage(wid, file) : null);
     };
     input.click();
   });
@@ -176,9 +194,29 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
     extensions,
     content: content ?? undefined,
     editable,
+    editorProps: {
+      handlePaste: (_view, event) => {
+        const files = [...(event.clipboardData?.files ?? [])];
+        if (!files.length || !editorRef.current) return false;
+        touched.current = true;
+        return insertImages(editorRef.current, wid, files);
+      },
+      handleDrop: (view, event) => {
+        const files = [...((event as DragEvent).dataTransfer?.files ?? [])];
+        if (!files.length || !editorRef.current) return false;
+        touched.current = true;
+        const at = view.posAtCoords({ left: (event as DragEvent).clientX, top: (event as DragEvent).clientY })?.pos;
+        const handled = insertImages(editorRef.current, wid, files, at);
+        if (handled) event.preventDefault();
+        return handled;
+      },
+    },
     // Ignore the editor's own normalisation on load; only save after the person has touched the page.
     onUpdate: ({ editor }) => { if (!touched.current) return; dirty.current = true; onChangeRef.current(editor.getJSON() as DocNode); },
   });
+
+  const editorRef = useRef<TEditor | null>(null);
+  editorRef.current = editor;
 
   // Adopt the server copy when someone else (or an AI agent) changed the page and we have nothing unsaved.
   const seen = useRef(version);

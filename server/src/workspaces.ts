@@ -18,6 +18,7 @@ export function createWorkspace(s:Store,a:Actor,v:{
   return summary(s,w.id,a.user.id);
 }
 export function acceptInvite(s:Store,i:any,a:Actor,emitMembers:(wid:string)=>void) {
+  if(a.workspaceId && a.workspaceId!==i.workspaceId)fail(403,'This token is limited to another workspace.');
   if(i.email && i.email!==a.user.email) fail(403,'This invitation is for another email address.');
   if(!members(s,i.workspaceId).some(m=>m.userId===a.user.id)) s.db.prepare('INSERT INTO memberships VALUES(?,?,?,?)').run(i.workspaceId,a.user.id,i.role,now());
   i.acceptedAt=now();

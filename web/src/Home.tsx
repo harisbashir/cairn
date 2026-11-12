@@ -1,18 +1,26 @@
-import { ChevronRight, FilePlus2, PanelLeft, RotateCcw, Search, Sparkles, Table2, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FilePlus2, PanelLeft, RotateCcw, Search, Sparkles, Table2, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Activity, Crumb } from '../../shared/types.ts';
 import { MOD, del, invalidateWorkspace, post, timeAgo, useActivity, useRecent, useTrash } from './api.ts';
 import { PageIcon, useShell } from './Shell.tsx';
 import { useUi } from './ui.tsx';
 
-export function TopBar({ crumbs = [], here, children }: { crumbs?: Crumb[]; here: ReactNode; children?: ReactNode }) {
+export function TopBar({ crumbs = [], here, children, back }: { crumbs?: Crumb[]; here: ReactNode; children?: ReactNode; back?: boolean }) {
   const s = useShell();
+  const navigate = useNavigate();
+  const parent = crumbs[crumbs.length - 1];
   return (
     <header className="topbar">
       {s.collapsed && <button className="icon-btn" aria-label="Show sidebar" title={`Show sidebar (${MOD}\\)`} onClick={s.toggleSidebar}><PanelLeft size={17} /></button>}
+      {s.phone && back && (
+        <button className="back-btn" aria-label={parent ? `Back to ${parent.title || 'Untitled'}` : 'Back'}
+          onClick={() => (parent ? navigate(`/w/${s.wid}/p/${parent.id}`) : window.history.length > 1 ? navigate(-1) : navigate(`/w/${s.wid}`))}>
+          <ChevronLeft size={22} /><span>{parent ? parent.title || 'Untitled' : 'Back'}</span>
+        </button>
+      )}
       <nav className="crumbs" aria-label="Location">
-        {crumbs.map((c) => (
+        {!s.phone && crumbs.map((c) => (
           <span key={c.id} style={{ display: 'contents' }}>
             <Link to={`/w/${s.wid}/p/${c.id}`}><PageIcon icon={c.icon} kind={c.kind} />{c.title || 'Untitled'}</Link>
             <ChevronRight className="sep" size={14} />
@@ -106,7 +114,7 @@ export function TrashPage() {
   };
   return (
     <>
-      <TopBar here="Trash" />
+      <TopBar here="Trash" back />
       <div className="content">
         <div className="home">
           <h1>Trash</h1>

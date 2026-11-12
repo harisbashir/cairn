@@ -9,10 +9,10 @@ import { createWorkspace, acceptInvite } from './workspaces.ts';
 
 export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:Actor,title:string)=>void,emitMembers:(wid:string)=>void) {
   const failures = new Map<string,number[]>();
-  app.get('/api/bootstrap',c=>c.json(bootstrap(s,sessionActor(s,c))));
+  app.get('/api/bootstrap',c=>c.json(bootstrap(s,c.get('actor'))));
   app.post('/api/auth/signup',async c=>{
     const v=await body(c,z.object({
-      email,name:text,password,inviteToken:text.optional()
+      email,name:text,password,inviteToken:text.optional(),token:z.boolean().optional()
     }));
     const first=s.all('users').length===0;
     const inv=v.inviteToken?invite(s,v.inviteToken):undefined;
@@ -31,14 +31,12 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
       },seed,'Welcome');
       return u;
     });
-    createSession(s,c,u.id);
-    return c.json(bootstrap(s,{
-      user:publicUser(u),actorType:'user',clientId:null
-    }));
+    const sessionToken=createSession(s,c,u.id,v.token);
+    return c.json({...bootstrap(s,{user:publicUser(u),actorType:'user',clientId:null}), ...(v.token ? {sessionToken} : {})});
   });
   app.post('/api/auth/login',async c=>{
     const v=await body(c,z.object({
-      email,password:z.string().max(1024)
+      email,password:z.string().max(1024),token:z.boolean().optional()
     }));
     const times=(failures.get(v.email)??[]).filter(t=>t>Date.now()-15*60000);
     failures.set(v.email,times);
@@ -51,10 +49,8 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
     failures.delete(v.email);
     u.lastSeenAt=now();
     s.put('users',u);
-    createSession(s,c,u.id);
-    return c.json(bootstrap(s,{
-      user:publicUser(u),actorType:'user',clientId:null
-    }));
+    const sessionToken=createSession(s,c,u.id,v.token);
+    return c.json({...bootstrap(s,{user:publicUser(u),actorType:'user',clientId:null}), ...(v.token ? {sessionToken} : {})});
   });
   app.post('/api/auth/logout',c=>{
     destroySession(s,c);
@@ -64,7 +60,7 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
   });
   app.patch('/api/me',async c=>{
     const v=await body(c,z.object({
-      name:text.optional(),color:color.optional(),currentPassword:z.string().max(1024).optional(),newPassword:password.optional()
+      prefs:z.object({theme:z.enum(['system','light','dark']).optional(),accent:z.enum(['blue','violet','green','orange','pink','graphite']).optional()}).strict().optional(),name:text.optional(),color:color.optional(),currentPassword:z.string().max(1024).optional(),newPassword:password.optional()
     }));
     const u=s.get('users',c.get('actor').user.id)!;
     if(v.newPassword) {
@@ -73,6 +69,7 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
     }
     if(v.name!==undefined)u.name=v.name;
     if(v.color!==undefined)u.color=v.color;
+    if(v.prefs)u.prefs={...u.prefs,...v.prefs};
     s.put('users',u);
     return c.json(publicUser(u));
   });

@@ -37,15 +37,15 @@ describe('MCP in-process Streamable HTTP', () => {
   });
   afterEach(async () => { await rm(dataDir, { recursive: true, force: true }); });
 
-  it('initializes and exposes all 16 tools, including readable model instructions', async () => {
+  it('initializes and exposes all tools, including readable model instructions', async () => {
     const initialized = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     expect(initialized.result.serverInfo.name).toBe('cairn');
     expect(initialized.result.instructions).toContain('Markdown');
     const tools = await rpc('tools/list');
-    expect(tools.result.tools).toHaveLength(16);
+    expect(tools.result.tools).toHaveLength(34);
     expect(result(await call('list_workspaces'))[0].id).toBe(workspaceId);
     expect((await app.request('/mcp')).status).toBe(401);
-    expect((await app.request('/mcp')).headers.get('www-authenticate')).toBe('Bearer');
+    expect((await app.request('/mcp')).headers.get('www-authenticate')).toContain('Bearer resource_metadata=');
     const deletion = await app.request('/mcp', { method: 'DELETE', headers: { Authorization: `Bearer ${secret}` } });
     expect(deletion.status).toBe(200);
   });
@@ -80,10 +80,10 @@ describe('MCP in-process Streamable HTTP', () => {
     expect(row.properties).toEqual({ State: 'Doing', Priority: 2, Tags: ['One', 'New'] });
     const next = result(await call('create_row', { database_id: database.id, title: 'Second', properties: { State: 'Done', Priority: 1 } }));
     const sorted = result(await call('query_database', { database_id: database.id, sorts: [{ property: 'Priority', dir: 'asc' }] }));
-    expect(sorted.map((r: any) => r.id)).toEqual([next.id, row.id]);
+    expect(sorted.rows.map((r: any) => r.id)).toEqual([next.id, row.id]);
     const filtered = result(await call('query_database', { database_id: database.id, filters: [{ property: 'State', op: 'eq', value: 'Doing' }] }));
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].properties.State).toBe('Doing');
+    expect(filtered.rows).toHaveLength(1);
+    expect(filtered.rows[0].properties.State).toBe('Doing');
     const updated = result(await call('update_row', { row_id: row.id, title: 'Changed', properties: { State: 'Brand new', Priority: null }, markdown: 'Replacement row body' }));
     expect(updated.title).toBe('Changed');
     expect(updated.properties.State).toBe('Brand new');
@@ -125,4 +125,28 @@ describe('MCP in-process Streamable HTTP', () => {
     const revoked = await app.request('/mcp', { method: 'POST', headers: { Authorization: `Bearer ${readToken.secret}` } });
     expect(revoked.status).toBe(401);
   });
+  it('runs v0.2 view, trash, sticky, home, image, export and calendar tools',async()=>{
+    const tools=(await rpc('tools/list')).result.tools;
+    for(const tool of tools)expect(tool.annotations).toMatchObject({title:expect.any(String),readOnlyHint:expect.any(Boolean),destructiveHint:expect.any(Boolean),idempotentHint:expect.any(Boolean)});
+    expect(result(await call('whoami')).user.name).toBe('Owner');
+    const database=result(await call('create_database',{workspace_id:workspaceId,title:'Schedule',properties:[{name:'Date',type:'date'},{name:'State',type:'select',options:['Todo','Done']}]}));
+    const row=result(await call('create_row',{database_id:database.id,title:'Meeting',properties:{Date:'2026-04-02',State:'Todo'}}));
+    result(await call('create_row',{database_id:database.id,title:'Later',properties:{Date:'2026-04-03'}}));
+    const listed=result(await call('list_databases',{workspace_id:workspaceId}));expect(listed.find((d:any)=>d.id===database.id)).toMatchObject({title:'Schedule',rowCount:2,properties:['Date','State']});
+    const queried=result(await call('query_database',{database_id:database.id,offset:1,limit:1}));expect(queried.total).toBe(2);expect(queried.rows).toHaveLength(1);
+    const view=result(await call('add_view',{database_id:database.id,name:'Calendar',type:'calendar',date_property:'Date',card_properties:['State'],filters:[{property:'State',op:'eq',value:'Todo'}]}));
+    expect(view.dateProp).toBe(database.schema[0].id);expect(view.filters[0].value).toBe(database.schema[1].options[0].id);
+    expect(result(await call('update_view',{database_id:database.id,view:'Calendar',name:'Timeline',type:'timeline',end_date_property:'Date'})).type).toBe('timeline');
+    result(await call('delete_view',{database_id:database.id,view:view.id}));
+    const events=result(await call('get_calendar',{workspace_id:workspaceId,from:'2026-04-01',to:'2026-05-01'}));expect(events.map((e:any)=>e.title)).toEqual(['Meeting','Later']);
+    const note=result(await call('add_sticky_note',{workspace_id:workspaceId,text:'Original',color:'pink'}));expect(result(await call('update_sticky_note',{note_id:note.id,text:'Changed'})).text).toBe('Changed');expect(result(await call('list_sticky_notes',{workspace_id:workspaceId}))[0].id).toBe(note.id);result(await call('delete_sticky_note',{note_id:note.id}));
+    const widgets=[{id:'welcome',type:'welcome',size:'full',config:{}}];result(await call('set_home',{workspace_id:workspaceId,widgets}));expect(result(await call('get_home',{workspace_id:workspaceId})).widgets).toEqual(widgets);
+    const child=result(await call('create_page',{workspace_id:workspaceId,parent_id:row.id,title:'Child'}));expect(result(await call('get_page',{page_id:row.id,include_children:true})).children[0].id).toBe(child.id);
+    const image=result(await call('attach_image',{page_id:row.id,base64:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',filename:'pixel.png',alt:'Pixel'}));expect(image.url).toContain('/files/');expect(result(await call('get_page',{page_id:row.id})).markdown).toContain('Pixel');
+    expect((await call('attach_image',{page_id:row.id,base64:'SGVsbG8='})).isError).toBe(true);
+    const exported=await call('export_page',{page_id:database.id,format:'csv'});expect(exported.content[0].text).toContain('Meeting,2026-04-02,Todo');
+    const copy=result(await call('duplicate_page',{page_id:row.id}));expect(copy.title).toBe('Meeting copy');await call('delete_page',{page_id:copy.id});expect(result(await call('list_trash',{workspace_id:workspaceId})).some((p:any)=>p.id===copy.id)).toBe(true);expect(result(await call('restore_page',{page_id:copy.id})).id).toBe(copy.id);
+    result(await call('delete_property',{database_id:database.id,property:'State'}));expect(result(await call('get_database',{database_id:database.id})).schema.map((p:any)=>p.name)).toEqual(['Date']);expect(result(await call('get_page',{page_id:row.id})).properties.State).toBeUndefined();
+  });
+
 });

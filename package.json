@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Cairn: a clear, AI-ready workspace for notes, docs and databases.",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-or-later",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
+    "cli": "tsx server/src/cli.ts",
     "dev:server": "tsx watch server/src/main.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",

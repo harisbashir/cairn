@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { LiveEvent, Page } from '../../shared/types.ts';
 import { membership, type Env } from './common.ts';
-import { sessionActor } from './auth.ts';
+import { credentialActor } from './credentials.ts';
 import { Pages } from './pages.ts';
 
 export function registerEvents(app: Hono<Env>, pages: Pages) {
@@ -23,7 +23,7 @@ export function registerEvents(app: Hono<Env>, pages: Pages) {
       };
       const send = (event: LiveEvent) => {
         if (done) return;
-        const current = sessionActor(pages.s, c);
+        const current = credentialActor(pages.s, c);
         const member = pages.s.db.prepare(
           'SELECT role FROM memberships WHERE workspaceId=? AND userId=?',
         ).get(wid, actor.user.id);

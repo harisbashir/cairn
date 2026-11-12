@@ -61,6 +61,8 @@ export function registerAdmin(app:Hono<Env>,s:Store,deleteWorkspace:(wid:string)
     }
     for(const w of owned)if(members(s,String(w.workspaceId)).length===1)deleteWorkspace(String(w.workspaceId));
     for(const t of s.all('tokens').filter(t=>t.userId===uid))s.remove('tokens',t.id);
+    for(const table of ['feeds','oauthGrants','oauthCodes'] as const)for(const value of s.all(table).filter(v=>v.userId===uid))s.remove(table,value.id);
+    for(const value of s.all('layouts').filter(v=>v.id.endsWith(':'+uid)))s.remove('layouts',value.id);
     s.remove('users',uid);
     return c.json({
       ok:true

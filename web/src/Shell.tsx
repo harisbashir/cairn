@@ -3,11 +3,12 @@ import {
   Search, Settings as SettingsIcon, Star, StarOff, Table2, Trash2, UserPlus, Users, Check, Sparkles,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import type { Bootstrap, LiveEvent, Page, PageKind, SearchHit, Tree, TreeNode, User, Visibility, WorkspaceSummary } from '../../shared/types.ts';
 import { clientId, MOD, del, invalidateWorkspace, patch, post, put, qc, searchPages, useTree } from './api.ts';
 import { SettingsModal, type SettingsSection } from './Settings.tsx';
-import { Avatar, MenuItem, Modal, Popover, useUi, WsBadge, WS_COLORS } from './ui.tsx';
+import { applyPrefs } from './theme.ts';
+import { Avatar, MenuItem, Modal, Popover, useIsPhone, useUi, WsBadge, WS_COLORS } from './ui.tsx';
 
 interface ShellCtx {
   wid: string;
@@ -23,6 +24,8 @@ interface ShellCtx {
   openPalette: () => void;
   toggleSidebar: () => void;
   collapsed: boolean;
+  phone: boolean;
+  signOut: () => void;
 }
 const Ctx = createContext<ShellCtx>(null!);
 export const useShell = () => useContext(Ctx);
@@ -40,7 +43,10 @@ export function Shell({ boot }: { boot: Bootstrap }) {
   const navigate = useNavigate();
   const ui = useUi();
   const workspace = boot.workspaces.find((w) => w.id === wid);
-  const [collapsed, setCollapsed] = useState(() => window.innerWidth < 760);
+  const phone = useIsPhone();
+  const [collapsed, setCollapsed] = useState(false);
+  const prefsKey = JSON.stringify(boot.user?.prefs ?? {});
+  useEffect(() => { applyPrefs(JSON.parse(prefsKey)); }, [prefsKey]);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const [palette, setPalette] = useState(false);
   const [newWs, setNewWs] = useState(false);
@@ -56,7 +62,13 @@ export function Shell({ boot }: { boot: Bootstrap }) {
       const ev = JSON.parse(m.data) as LiveEvent;
       if (ev.type === 'ping') return;
       if (ev.type === 'members') { qc.invalidateQueries({ queryKey: ['members', wid] }); qc.invalidateQueries({ queryKey: ['bootstrap'] }); return; }
-      if (ev.clientId === clientId) return;
+      if (ev.type === 'home' || ev.type === 'stickies') {
+        // Dashboard and sticky-note queries keep their own keys; refresh any whose key mentions them.
+        const word = ev.type === 'home' ? 'home' : 'stick';
+        qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).toLowerCase().includes(word) });
+        return;
+      }
+      if (ev.type !== 'page' || ev.clientId === clientId) return;
       invalidateWorkspace(wid);
       qc.invalidateQueries({ queryKey: ['page', ev.pageId] });
       if (ev.parentId) qc.invalidateQueries({ queryKey: ['rows', ev.parentId] });
@@ -112,14 +124,16 @@ export function Shell({ boot }: { boot: Bootstrap }) {
   const ctx: ShellCtx = {
     wid, workspace, user: boot.user!, boot, canEdit, tree: tree.data, createPage, trashPage, toggleFavorite,
     openSettings: (s = 'account') => setSettings(s), openPalette: () => setPalette(true),
-    toggleSidebar: () => setCollapsed((v) => !v), collapsed,
+    toggleSidebar: () => setCollapsed((v) => !v), collapsed: collapsed && !phone, phone,
+    signOut: async () => { await post('/api/auth/logout'); location.href = '/'; },
   };
 
   return (
     <Ctx.Provider value={ctx}>
-      <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-        <Sidebar onNewWorkspace={() => setNewWs(true)} />
-        <main className="main"><Outlet /></main>
+      <div className={`shell${collapsed && !phone ? ' collapsed' : ''}${phone ? ' phone' : ''}`}>
+        {!phone && <Sidebar onNewWorkspace={() => setNewWs(true)} />}
+        <main className="main"><Outlet context={{ onNewWorkspace: () => setNewWs(true) }} /></main>
+        {phone && <TabBar />}
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
       {settings && <SettingsModal section={settings} onSection={setSettings} onClose={() => setSettings(null)} />}
@@ -182,7 +196,8 @@ function NewWorkspace({ onClose }: { onClose: () => void }) {
 }
 
 // ---------- Sidebar ----------
-function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
+/** The page tree: favourites, shared pages, private pages and Trash. Used by the sidebar and the phone's Pages tab. */
+export function PageTree() {
   const s = useShell();
   const { pid } = useParams();
   const nodes = s.tree?.nodes ?? [];
@@ -225,7 +240,28 @@ function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
       {list.map((n) => <TreeItem key={n.id} node={n} depth={0} byParent={byParent} open={open} toggle={toggle} />)}
     </>
   );
+  return (
+    <>
+      {favs.length > 0 && (
+        <>
+          <div className="side-head"><span>Favorites</span></div>
+          {favs.map((n) => (
+            <div key={n.id} className={`tree-row${pid === n.id ? ' active' : ''}`} style={{ paddingLeft: 8 }}>
+              <Link to={`/w/${s.wid}/p/${n.id}`}><PageIcon icon={n.icon} kind={n.kind} /><span className="t">{n.title || 'Untitled'}</span></Link>
+            </div>
+          ))}
+        </>
+      )}
+      {section('Workspace', shared, 'workspace', 'No pages yet.')}
+      {section('Private', priv, 'private', 'Only you can see pages here.')}
+      <div className="side-head" />
+      <NavLink to={`/w/${s.wid}/trash`} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}><Trash2 size={16} />Trash</NavLink>
+    </>
+  );
+}
 
+function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
+  const s = useShell();
   return (
     <nav className="sidebar" aria-label="Workspace">
       <div className="side-top">
@@ -238,22 +274,7 @@ function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
         </button>
         <NavLink end to={`/w/${s.wid}`} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}><HomeIcon size={16} />Home</NavLink>
       </div>
-      <div className="side-scroll">
-        {favs.length > 0 && (
-          <>
-            <div className="side-head"><span>Favorites</span></div>
-            {favs.map((n) => (
-              <div key={n.id} className={`tree-row${pid === n.id ? ' active' : ''}`} style={{ paddingLeft: 8 }}>
-                <Link to={`/w/${s.wid}/p/${n.id}`}><PageIcon icon={n.icon} kind={n.kind} /><span className="t">{n.title || 'Untitled'}</span></Link>
-              </div>
-            ))}
-          </>
-        )}
-        {section('Workspace', shared, 'workspace', 'No pages yet.')}
-        {section('Private', priv, 'private', 'Only you can see pages here.')}
-        <div className="side-head" />
-        <NavLink to={`/w/${s.wid}/trash`} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}><Trash2 size={16} />Trash</NavLink>
-      </div>
+      <div className="side-scroll"><PageTree /></div>
       <div className="side-bottom">
         <Popover placement="top-start" trigger={(p) => (
           <button className="user-btn" {...p}><Avatar name={s.user.name} color={s.user.color} /><span className="grow">{s.user.name}</span></button>
@@ -262,13 +283,83 @@ function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
           <MenuItem icon={<SettingsIcon size={16} />} onClick={() => s.openSettings('account')}>Settings</MenuItem>
           <MenuItem icon={<Sparkles size={16} />} onClick={() => s.openSettings('ai')}>Connect AI (MCP)</MenuItem>
           <div className="menu-sep" />
-          <MenuItem icon={<LogOut size={16} />} onClick={async () => { await post('/api/auth/logout'); location.href = '/'; }}>Sign Out</MenuItem>
+          <MenuItem icon={<LogOut size={16} />} onClick={s.signOut}>Sign Out</MenuItem>
         </Popover>
         {(s.workspace.role === 'owner' || s.workspace.role === 'admin') && (
           <button className="icon-btn" aria-label="Invite people" title="Invite people" onClick={() => s.openSettings('members')}><UserPlus size={16} /></button>
         )}
       </div>
     </nav>
+  );
+}
+
+// ---------- Phone navigation ----------
+function TabBar() {
+  const s = useShell();
+  const tab = (to: string, end: boolean, icon: React.ReactNode, label: string) => (
+    <NavLink to={to} end={end} className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>{icon}<span>{label}</span></NavLink>
+  );
+  return (
+    <nav className="tabbar" aria-label="Main">
+      {tab(`/w/${s.wid}`, true, <HomeIcon size={22} />, 'Home')}
+      {tab(`/w/${s.wid}/browse`, false, <FileText size={22} />, 'Pages')}
+      {s.canEdit ? (
+        <Popover placement="top" trigger={(p) => <button className="tab new" aria-label="New" {...p}><span className="plus"><Plus size={22} /></span></button>}>
+          <div className="menu-label">Create</div>
+          <MenuItem icon={<FileText size={18} />} onClick={() => s.createPage({})}>Page</MenuItem>
+          <MenuItem icon={<Table2 size={18} />} onClick={() => s.createPage({ kind: 'database' })}>Database</MenuItem>
+          <MenuItem icon={<Lock size={18} />} onClick={() => s.createPage({ visibility: 'private' })}>Private Page</MenuItem>
+        </Popover>
+      ) : <span className="tab" />}
+      <button className="tab" onClick={s.openPalette}><Search size={22} /><span>Search</span></button>
+      {tab(`/w/${s.wid}/more`, false, <Avatar name={s.user.name} color={s.user.color} />, 'More')}
+    </nav>
+  );
+}
+
+/** Phone "Pages" tab: the whole page tree, full width. */
+export function BrowsePage() {
+  const s = useShell();
+  return (
+    <>
+      <header className="topbar"><h1 className="phone-title">Pages</h1></header>
+      <div className="content"><div className="browse"><PageTree /></div></div>
+      {!s.phone && <Navigate to={`/w/${s.wid}`} replace />}
+    </>
+  );
+}
+
+/** Phone "More" tab: workspaces, settings and account. */
+export function MorePage() {
+  const s = useShell();
+  const navigate = useNavigate();
+  const { onNewWorkspace } = useOutletContext<{ onNewWorkspace: () => void }>();
+  const row = (icon: React.ReactNode, label: string, onClick: () => void, danger = false) => (
+    <button className={`more-row${danger ? ' danger' : ''}`} onClick={onClick}>{icon}<span className="grow">{label}</span><ChevronRight size={18} /></button>
+  );
+  return (
+    <>
+      <header className="topbar"><h1 className="phone-title">More</h1></header>
+      <div className="content"><div className="browse">
+        <div className="more-me"><Avatar name={s.user.name} color={s.user.color} large /><span><b>{s.user.name}</b><div className="subtle">{s.user.email}</div></span></div>
+        <div className="side-head"><span>Workspaces</span></div>
+        <div className="more-group">
+          {s.boot.workspaces.map((w) => (
+            <button key={w.id} className="more-row" onClick={() => navigate(`/w/${w.id}`)}><WsBadge {...w} /><span className="grow">{w.name}</span>{w.id === s.wid ? <Check size={18} color="var(--accent)" /> : <ChevronRight size={18} />}</button>
+          ))}
+          {row(<Plus size={20} />, 'New Workspace', onNewWorkspace)}
+        </div>
+        <div className="side-head"><span>{s.workspace.name}</span></div>
+        <div className="more-group">
+          {row(<Users size={20} />, 'Members', () => s.openSettings('members'))}
+          {row(<Trash2 size={20} />, 'Trash', () => navigate(`/w/${s.wid}/trash`))}
+          {row(<SettingsIcon size={20} />, 'Settings', () => s.openSettings('account'))}
+          {row(<Sparkles size={20} />, 'Connect AI (MCP)', () => s.openSettings('ai'))}
+        </div>
+        <div className="more-group" style={{ marginTop: 24 }}>{row(<LogOut size={20} />, 'Sign Out', s.signOut, true)}</div>
+      </div></div>
+      {!s.phone && <Navigate to={`/w/${s.wid}`} replace />}
+    </>
   );
 }
 

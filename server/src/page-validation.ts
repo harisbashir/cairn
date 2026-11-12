@@ -21,8 +21,8 @@ export const property = z.object({
   relationDatabaseId: z.string().optional(),
 });
 const propValue = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]);
-const view = z.object({
-  id: z.string(), name: z.string(), type: z.enum(['table', 'board', 'list']),
+export const view = z.object({
+  id: z.string(), name: z.string(), type: z.enum(['table', 'board', 'list', 'gallery', 'calendar', 'timeline', 'chart', 'feed']),
   filters: z.array(z.object({
     propertyId: z.string(),
     op: z.enum(['contains', 'not_contains', 'eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'is_empty', 'is_not_empty', 'checked', 'unchecked']),
@@ -30,6 +30,9 @@ const view = z.object({
   })),
   sorts: z.array(z.object({ propertyId: z.string(), dir: z.enum(['asc', 'desc']) })),
   groupBy: z.string().optional(), hidden: z.array(z.string()).optional(),
+  cardProps: z.array(z.string()).optional(), columnOrder: z.array(z.string()).optional(), hiddenColumns: z.array(z.string()).optional(),
+  dateProp: z.string().optional(), endDateProp: z.string().optional(), zoom: z.enum(['week','month','quarter']).optional(), cover: z.enum(['page','none']).optional(), phone: z.enum(['auto','same']).optional(),
+  chart: z.object({ kind: z.enum(['bar','donut','line']), groupBy: z.string(), measure: z.enum(['count','sum','avg']), valueProp: z.string().optional() }).optional(),
   widths: z.record(z.string(), z.number()).optional(),
 });
 export const pagePatch = z.object({

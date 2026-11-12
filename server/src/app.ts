@@ -1,52 +1,56 @@
 import { Hono } from 'hono';
 import { Store } from './db.ts';
-import { ApiException, type Env, fail } from './common.ts';
-import { sessionActor } from './auth.ts';
+import { ApiException, type Env } from './common.ts';
+import { apiAuthentication } from './api-auth.ts';
+import { hardening } from './http.ts';
 import { registerAccounts } from './accounts.ts';
 import { Pages, registerPages } from './pages.ts';
 import { Events } from './events.ts';
 import { registerEvents } from './event-routes.ts';
 import { registerAssets, registerStatic } from './assets.ts';
 import { registerMcp } from './mcp.ts';
+import { registerDashboard } from './dashboard.ts';
+import { registerOAuth } from './oauth.ts';
+import { registerCalendars } from './calendars.ts';
+import { registerTransfer } from './transfer.ts';
+import { registerBackups } from './backups.ts';
+import { startHousekeeping } from './housekeeping.ts';
+import { openapi } from './openapi.ts';
 
-export function createApp({ dataDir }: { dataDir: string }) {
+export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch }: { dataDir: string; fetch?: typeof globalThis.fetch }) {
   const app = new Hono<Env>();
   const store = new Store(dataDir);
   const events = new Events();
   const pages = new Pages(store, events);
-
   app.onError((error, c) => {
+    c.header('X-Content-Type-Options','nosniff'); c.header('Referrer-Policy','same-origin'); c.header('X-Frame-Options','DENY');
     if (error instanceof ApiException) {
       const codes = { 400: 'invalid', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 409: 'conflict' };
       return c.json({ error: { code: codes[error.status], message: error.message } }, error.status);
     }
-    console.error(error);
+    // Error messages from upstream services can contain credentials; never log them.
     return c.json({ error: { code: 'internal', message: 'An unexpected server error occurred.' } }, 500);
   });
   app.notFound(c => c.json({ error: { code: 'not_found', message: 'Resource not found.' } }, 404));
-
-  app.use('/api/*', async (c, next) => {
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !c.req.header('X-Cairn-Client')?.trim()) {
-      fail(400, 'X-Cairn-Client is required for changes.');
-    }
-    const path = c.req.path;
-    const isPublic = path === '/api/bootstrap' || path === '/api/auth/signup' || path === '/api/auth/login'
-      || (c.req.method === 'GET' && (/^\/api\/invites\/[^/]+$/.test(path) || path.startsWith('/api/public/')));
-    const actor = sessionActor(store, c);
-    if (actor) c.set('actor', actor);
-    if (!isPublic && !actor) fail(401, 'Please sign in to continue.');
-    await next();
-  });
-
+  app.use('*', hardening);
+  app.use('/api/*', apiAuthentication(store));
+  app.get('/api/health',c=>c.json({ok:true,version:'0.2.0'}));
   registerAccounts(app, store,
     (wid, actor, title) => { pages.create(actor, wid, { title }); },
-    wid => pages.deleteWorkspace(wid),
-    wid => events.emit(wid, { type: 'members' }),
+    wid => pages.deleteWorkspace(wid), wid => events.emit(wid, { type: 'members' }),
   );
   registerPages(app, pages);
+  registerDashboard(app,pages);
+  registerCalendars(app,pages,fetchImpl);
+  registerTransfer(app,pages,fetchImpl);
+  registerBackups(app,pages,fetchImpl);
+  registerOAuth(app,store);
+  startHousekeeping(store,pages);
   registerEvents(app, pages);
   registerAssets(app, pages);
-  registerMcp(app, pages);
+  registerMcp(app, pages,fetchImpl);
+  app.get('/api/openapi.json',c=>c.json(openapi(app)));
+  for(const route of [...app.routes]) if(route.path.startsWith('/api/') && !route.path.includes('*'))app.on(route.method,route.path.replace(/^\/api\//,'/api/v1/'),route.handler);
   registerStatic(app);
   return app;
 }

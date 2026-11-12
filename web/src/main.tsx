@@ -4,10 +4,13 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { qc, useBootstrap } from './api.ts';
 import { AuthPage, InvitePage } from './Auth.tsx';
-import { Home, TrashPage } from './Home.tsx';
+import { TrashPage } from './Home.tsx';
+import { Home } from './home/Dashboard.tsx';
 import { PageRoute } from './PageView.tsx';
 import { PublicPage } from './PublicPage.tsx';
-import { Shell } from './Shell.tsx';
+import { BrowsePage, MorePage, Shell } from './Shell.tsx';
+import { applyStoredPrefs } from './theme.ts';
+import { OAuthConsent } from './OAuthConsent.tsx';
 import { UiProvider } from './ui.tsx';
 import './styles.css';
 
@@ -30,6 +33,7 @@ function Root() {
       <Routes>
         <Route path="/invite/:token" element={<InvitePage boot={boot.data} />} />
         <Route path="/signup" element={<AuthPage mode="signup" instance={instance} />} />
+        <Route path="/oauth/consent" element={<AuthPage mode="login" instance={instance} stay />} />
         <Route path="*" element={<AuthPage mode={instance.needsSetup ? 'signup' : 'login'} instance={instance} />} />
       </Routes>
     );
@@ -39,14 +43,22 @@ function Root() {
   return (
     <Routes>
       <Route path="/invite/:token" element={<InvitePage boot={boot.data} />} />
+      <Route path="/oauth/consent" element={<OAuthConsent />} />
       <Route path="/w/:wid" element={<Shell boot={boot.data} />}>
         <Route index element={<Home />} />
         <Route path="trash" element={<TrashPage />} />
+        <Route path="browse" element={<BrowsePage />} />
+        <Route path="more" element={<MorePage />} />
         <Route path="p/:pid" element={<PageRoute />} />
       </Route>
       <Route path="*" element={home ? <Navigate to={`/w/${home.id}`} replace /> : <Shell boot={boot.data} />} />
     </Routes>
   );
+}
+
+applyStoredPrefs();
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
 }
 
 createRoot(document.getElementById('root')!).render(

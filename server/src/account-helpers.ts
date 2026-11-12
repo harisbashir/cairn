@@ -53,8 +53,8 @@ export function bootstrap(s:Store,a?:Actor) {
   const st=settings(s);
   return {
     user:a?.user ?? null,instance:{
-      name:st.instanceName,allowSignup:st.allowSignup,needsSetup:s.all('users').length===0,version:'0.1.0'
-    },workspaces:a?s.db.prepare('SELECT workspaceId FROM memberships WHERE userId=?').all(a.user.id).map(m=>summary(s,String(m.workspaceId),a.user.id)):[]
+      name:st.instanceName,allowSignup:st.allowSignup,needsSetup:s.all('users').length===0,version:'0.2.0'
+    },workspaces:a?s.db.prepare('SELECT workspaceId FROM memberships WHERE userId=?').all(a.user.id).filter(m=>!a.workspaceId||a.workspaceId===m.workspaceId).map(m=>summary(s,String(m.workspaceId),a.user.id)):[]
   };
 }
 export function invite(s:Store,token:string) {
@@ -68,7 +68,7 @@ export function newUser(s:Store,input:{
 }) {
   if(s.all('users').some(u=>u.email===input.email)) fail(409,'An account with this email already exists.');
   const u={
-    id:id(),email:input.email,name:input.name,color:'#6366f1',isAdmin:input.isAdmin??false,disabled:false,createdAt:now(),lastSeenAt:null,...passwordFields(input.password)
+    prefs:{theme:'system' as const,accent:'blue' as const},id:id(),email:input.email,name:input.name,color:'#6366f1',isAdmin:input.isAdmin??false,disabled:false,createdAt:now(),lastSeenAt:null,...passwordFields(input.password)
   };
   s.put('users',u);
   return u;

@@ -1,11 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import type { Page } from '../../shared/types.ts';
+import { docToPlainText } from '../../shared/markdown.ts';
 
 export const id = () => randomBytes(18).toString('base64url');
 export const now = () => new Date().toISOString();
-const tables = ['users', 'workspaces', 'pages', 'invites', 'tokens', 'versions', 'activity', 'files'] as const;
+const tables = ['users', 'workspaces', 'pages', 'invites', 'tokens', 'versions', 'activity', 'files', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthClients', 'oauthRequests', 'oauthCodes', 'oauthGrants', 'backupSettings', 'backupRuns'] as const;
 export type Table = typeof tables[number];
 
 export class Store {
@@ -48,14 +50,48 @@ export class Store {
         COMMIT;
       `);
     }
+    if (version < 2) {
+      this.db.exec('BEGIN');
+      try {
+        for (const table of tables) this.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)))`);
+        this.reindex();
+        this.db.exec('PRAGMA user_version=2; COMMIT');
+      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
+  }
+  indexPage(page: Page) {
+    const text: string[] = [];
+    const schema = page.kind === 'row' && page.parentId ? this.get<Page>('pages',page.parentId)?.schema ?? [] : [];
+    for (const property of schema) {
+      const value=page.props[property.id];
+      if(value==null || ['person','relation','checkbox'].includes(property.type))continue;
+      for(const item of Array.isArray(value)?value:[value]) {
+        if(property.options){const option=property.options.find(o=>o.id===item);if(option)text.push(option.name);}
+        else text.push(String(item));
+      }
+    }
+    this.db.prepare('DELETE FROM search WHERE id=?').run(page.id);
+    this.db.prepare('INSERT INTO search(id,title,body) VALUES(?,?,?)').run(page.id,page.title,docToPlainText(page.content)+' '+text.join(' '));
+  }
+  reindex() { this.db.exec('DELETE FROM search'); for(const page of this.all<Page>('pages'))this.indexPage(page); }
+
+  defaults(table: Table, value: any): any {
+    if (table === 'users') value.prefs = { theme: 'system', accent: 'blue', ...value.prefs };
+    if (table === 'files') {
+      let info; try { info=statSync(join(this.dataDir,'files',value.id)); } catch { /* An old upload may already be missing. */ }
+      value.mime ??= value.type ?? 'application/octet-stream'; value.size ??= info?.size ?? 0;
+      value.createdAt ??= info?.mtime.toISOString() ?? '1970-01-01T00:00:00.000Z';
+    }
+    if (table === 'pages') { value.cover ??= ''; value.updatedByType ??= 'user'; }
+    return value;
   }
 
   all<T = any>(table: Table): T[] {
-    return this.db.prepare(`SELECT data FROM ${table} ORDER BY rowid`).all().map(row => JSON.parse(String(row.data)));
+    return this.db.prepare(`SELECT data FROM ${table} ORDER BY rowid`).all().map(row => this.defaults(table, JSON.parse(String(row.data))));
   }
   get<T = any>(table: Table, key: string): T | undefined {
     const row = this.db.prepare(`SELECT data FROM ${table} WHERE id=?`).get(key);
-    return row ? JSON.parse(String(row.data)) : undefined;
+    return row ? this.defaults(table, JSON.parse(String(row.data))) : undefined;
   }
   put(table: Table, value: { id: string; [key: string]: any }) {
     this.db.prepare(`INSERT INTO ${table}(id,data) VALUES(?,?)

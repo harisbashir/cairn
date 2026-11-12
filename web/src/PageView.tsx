@@ -17,7 +17,7 @@ export function PageRoute() {
   if (page.isError || !page.data) {
     return (
       <>
-        <TopBar here="Not found" />
+        <TopBar back here="Not found" />
         <div className="content"><div className="empty" style={{ paddingTop: 120 }}>
           <h2>This page isn’t available</h2>
           <span>It may have been deleted, or it’s private to someone else.</span>
@@ -118,7 +118,7 @@ function PageView({ page }: { page: Page }) {
 
   return (
     <>
-      <TopBar crumbs={page.breadcrumbs} here={<><PageIcon icon={icon} kind={page.kind} />{title || 'Untitled'}</>}>
+      <TopBar back crumbs={page.breadcrumbs} here={<><PageIcon icon={icon} kind={page.kind} />{title || 'Untitled'}</>}>
         <span className="saved" aria-live="polite">
           {status === 'saving' ? 'Saving…' : status === 'error' ? 'Not saved' : (
             <>{page.updatedByType === 'ai' && <AiTag />} Edited {timeAgo(page.updatedAt)}</>

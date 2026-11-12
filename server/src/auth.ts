@@ -15,18 +15,23 @@ export function passwordMatches(user: {salt:string;passwordHash:string}, passwor
   const actual = scryptSync(password, user.salt, 64);
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
-export function createSession(s: Store, c: Context, userId: string) {
+export function createSession(s: Store, c: Context, userId: string, tokenOnly = false) {
   const secret = randomBytes(32).toString('base64url');
   s.db.prepare('INSERT INTO sessions(hash,userId,expiresAt) VALUES(?,?,?)').run(hashSecret(secret), userId, new Date(Date.now()+30*86400000).toISOString());
-  setCookie(c, 'cairn_session', secret, { httpOnly:true, sameSite:'Lax', secure:process.env.CAIRN_SECURE_COOKIES==='1', path:'/', maxAge:30*86400 });
+  if (!tokenOnly) setCookie(c, 'cairn_session', secret, { httpOnly:true, sameSite:'Lax', secure:process.env.CAIRN_SECURE_COOKIES==='1', path:'/', maxAge:30*86400 });
+  return secret;
 }
 export function destroySession(s: Store, c: Context) {
-  const secret = getCookie(c, 'cairn_session');
+  const authorization = c.req.header('Authorization');
+  // An explicit credential must never fall back to ambient cookie authentication.
+  const secret = authorization !== undefined ? authorization.match(/^Bearer (\S+)$/i)?.[1] : getCookie(c, 'cairn_session');
   if (secret) s.db.prepare('DELETE FROM sessions WHERE hash=?').run(hashSecret(secret));
   deleteCookie(c, 'cairn_session', { path:'/' });
 }
 export function sessionActor(s: Store, c: Context): Actor | undefined {
-  const secret = getCookie(c, 'cairn_session');
+  const authorization = c.req.header('Authorization');
+  // An explicit credential must never fall back to ambient cookie authentication.
+  const secret = authorization !== undefined ? authorization.match(/^Bearer (\S+)$/i)?.[1] : getCookie(c, 'cairn_session');
   if (!secret) return;
   const session = s.db.prepare('SELECT userId FROM sessions WHERE hash=? AND expiresAt>?').get(hashSecret(secret), now());
   if (!session) return;
@@ -43,5 +48,5 @@ export function tokenActor(s: Store, authorization: string | undefined): Actor |
   if (!user || user.disabled) return;
   token.lastUsedAt = now();
   s.put('tokens', token);
-  return { user:publicUser(user), actorType:'ai', clientId:null, access:token.access, workspaceId:token.workspaceId };
+  return { user:publicUser(user), actorType:'user', clientId:null, access:token.access, workspaceId:token.workspaceId };
 }

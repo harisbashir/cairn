@@ -28,13 +28,16 @@ export function Popover({
   });
   const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context), useRole(context)]);
   const close = useCallback(() => setOpen(false), [setOpen]);
+  const phone = useIsPhone();
   return (
     <>
       {trigger({ ref: refs.setReference, ...getReferenceProps() }, open)}
       {open && (
         <FloatingPortal>
+          {phone && <div className="sheet-backdrop" />}
           <FloatingFocusManager context={context} modal={false} initialFocus={-1}>
-            <div ref={refs.setFloating} style={floatingStyles} className={className} {...getFloatingProps()}>
+            <div ref={refs.setFloating} style={phone ? undefined : floatingStyles} className={phone ? `${className} sheet` : className} {...getFloatingProps()}>
+              {phone && <div className="sheet-grabber" aria-hidden />}
               <CloseCtx.Provider value={close}>{typeof children === 'function' ? children(close) : children}</CloseCtx.Provider>
             </div>
           </FloatingFocusManager>
@@ -98,6 +101,12 @@ export function UiProvider({ children }: { children: ReactNode }) {
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), undo ? 7000 : 3500);
     },
   }), []);
+  // Lets non-React code (editor plugins) show a toast.
+  useEffect(() => {
+    const on = (e: Event) => value.toast(String((e as CustomEvent).detail));
+    window.addEventListener('cairn:toast', on);
+    return () => window.removeEventListener('cairn:toast', on);
+  }, [value]);
   const answer = (v: boolean) => { ask?.resolve(v); setAsk(null); };
   return (
     <UiCtx.Provider value={value}>
@@ -164,3 +173,17 @@ export function EmojiPicker({ onPick, allowRemove }: { onPick: (emoji: string) =
 }
 
 export const WS_COLORS = ['#4263eb', '#7048e8', '#ae3ec9', '#d6336c', '#e8590c', '#f08c00', '#2f9e44', '#0c8599', '#495057'];
+
+// ---------- Screen size ----------
+const phoneQuery = typeof window !== 'undefined' ? window.matchMedia('(max-width: 760px)') : null;
+/** True on phone-sized screens. Layouts switch on available width, not on device type. */
+export function useIsPhone(): boolean {
+  const [phone, setPhone] = useState(() => !!phoneQuery?.matches);
+  useEffect(() => {
+    if (!phoneQuery) return;
+    const on = () => setPhone(phoneQuery.matches);
+    phoneQuery.addEventListener('change', on);
+    return () => phoneQuery.removeEventListener('change', on);
+  }, []);
+  return phone;
+}
