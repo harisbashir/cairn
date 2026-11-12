@@ -356,10 +356,11 @@ kbd {
 }
 .card:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
 .card .ico { font-size: 22px; height: 26px; display: flex; align-items: center; color: var(--text-3); }
-.card .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card > * { min-width: 0; }
+.card .t { font-weight: 600; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .card .m { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feed { display: grid; border-radius: var(--r-l); box-shadow: var(--shadow-1); background: var(--bg-raised); overflow: hidden; }
-.feed-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; color: inherit; text-decoration: none; border-top: 1px solid var(--border); }
+.feed { display: grid; grid-template-columns: minmax(0, 1fr); border-radius: var(--r-l); box-shadow: var(--shadow-1); background: var(--bg-raised); overflow: hidden; }
+.feed-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; color: inherit; text-decoration: none; border-top: 1px solid var(--border); }
 .feed-row:first-child { border-top: 0; }
 a.feed-row:hover { background: var(--hover); }
 .feed-row .when { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
@@ -379,7 +380,7 @@ a.feed-row:hover { background: var(--hover); }
 .page-title::placeholder { color: var(--border-strong); }
 .page-meta { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12.5px; margin-bottom: 14px; flex-wrap: wrap; }
 .props { display: grid; gap: 2px; margin: 4px 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-.prop-line { display: grid; grid-template-columns: 170px 1fr; align-items: center; min-height: 32px; }
+.prop-line { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: center; min-height: 32px; }
 .prop-name { display: flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--o-yellow-bg); color: var(--o-yellow-fg); font-weight: 500; }
 .banner .grow { flex: 1; }
@@ -692,3 +693,14 @@ button.cell:hover { background: var(--hover); }
   .list-row { min-height: 48px; }
   .auth-card { padding: 24px 20px; }
 }
+
+/* Board columns grouped by something other than an option: people, linked pages, months, values. */
+.col-head .marker, .col-head .col-label { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-head .col-label { font-weight: 600; font-size: 13.5px; }
+.seg-strip button { max-width: 72vw; overflow: hidden; text-overflow: ellipsis; }
+.col-add .clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Single-column grids: let long unbroken text wrap or ellipsize instead of widening the column. */
+.list, .col, .col-cards, .fd, .fd-post, .gv-body, .cal-pills, .props, .settings-body section { grid-template-columns: minmax(0, 1fr); }
+.list-row, .gv-card, .fd-post * { min-width: 0; }
+.gv-title, .list-row .t { overflow-wrap: anywhere; }
+.kcard .t, .pcard-main .t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }

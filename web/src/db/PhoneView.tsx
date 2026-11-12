@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Property, Row } from '../../../shared/types.ts';
 import { MenuItem, Popover } from '../ui.tsx';
-import { boardColumns } from './BoardView.tsx';
+import { groupableProps, groupsFor, inGroup, newRowValue } from './groups.ts';
 import { CardMeta, Chip, fmtDate, type Db } from './kit.tsx';
 
 /**
@@ -20,24 +20,26 @@ export function PhoneView({ db }: { db: Db }) {
 }
 
 function Card({ row, db, group }: { row: Row; db: Db; group?: Property }) {
-  const current = group ? group.options?.find((o) => o.id === row.props[group.id]) : undefined;
+  // Only single-choice options get the quick "Move to" sheet; other groupings change through the row's page.
+  const pick = group && (group.type === 'select' || group.type === 'status') ? group : undefined;
+  const current = pick ? pick.options?.find((o) => o.id === row.props[pick.id]) : undefined;
   return (
     <div className="pcard">
       <Link to={db.rowHref(row.id)} className="pcard-main">
         <span className="t">{row.icon && <span className="emoji ico">{row.icon}</span>}{row.title || 'Untitled'}</span>
         <CardMeta row={row} db={db} skip={group?.id} />
       </Link>
-      {group && db.canEdit ? (
+      {pick && db.canEdit ? (
         <Popover placement="bottom-end" trigger={(p) => (
-          <button className="pcard-move" aria-label={`${group.name}: ${current?.name ?? 'none'}. Change`} {...p}>
-            {current ? <Chip opt={current} status={group.type === 'status'} /> : <span className="chip">Set {group.name}</span>}
+          <button className="pcard-move" aria-label={`${pick.name}: ${current?.name ?? 'none'}. Change`} {...p}>
+            {current ? <Chip opt={current} status={pick.type === 'status'} /> : <span className="chip">Set {pick.name}</span>}
           </button>
         )}>
           <div className="menu-label">Move to</div>
-          {(group.options ?? []).map((o) => (
-            <MenuItem key={o.id} active={o.id === current?.id} onClick={() => db.patchRow(row.id, { props: { [group.id]: o.id } })}><Chip opt={o} status={group.type === 'status'} /></MenuItem>
+          {(pick.options ?? []).map((o) => (
+            <MenuItem key={o.id} active={o.id === current?.id} onClick={() => db.patchRow(row.id, { props: { [pick.id]: o.id } })}><Chip opt={o} status={pick.type === 'status'} /></MenuItem>
           ))}
-          {current && <MenuItem onClick={() => db.patchRow(row.id, { props: { [group.id]: null } })}>No {group.name}</MenuItem>}
+          {current && <MenuItem onClick={() => db.patchRow(row.id, { props: { [pick.id]: null } })}>No {pick.name}</MenuItem>}
         </Popover>
       ) : <ChevronRight size={18} color="var(--text-3)" aria-hidden />}
     </div>
@@ -47,16 +49,17 @@ function Card({ row, db, group }: { row: Row; db: Db; group?: Property }) {
 function Grouped({ db }: { db: Db }) {
   const { view, schema, shown } = db;
   const navigate = useNavigate();
-  const group = schema.find((p) => p.id === view.groupBy && (p.type === 'select' || p.type === 'status'))
+  const groupable = groupableProps(schema);
+  const group = groupable.find((p) => p.id === view.groupBy)
     ?? (view.type === 'board' ? undefined : schema.find((p) => p.type === 'status'));
-  const columns = useMemo(() => (group ? boardColumns(db, group) : []), [group, db]);
-  const count = (id: string) => shown.filter((r) => String(r.props[group!.id] ?? '') === id).length;
-  const visible = columns.filter((c) => c.opt || count(c.id) > 0);
+  const visible = useMemo(() => (group ? groupsFor(group, shown, view, db) : []), [group, shown, view, db]);
+  const counts = useMemo(() => new Map(visible.map((g) => [g.id, group ? shown.filter((r) => inGroup(r, group, g.id)).length : 0])), [visible, group, shown]);
+  const tabs = visible.filter((g) => g.opt || (counts.get(g.id) ?? 0) > 0);
   const [tab, setTab] = useState<string>('all');
-  const active = tab === 'all' || visible.some((c) => c.id === tab) ? tab : 'all';
-  const rows = !group || active === 'all' ? shown : shown.filter((r) => String(r.props[group.id] ?? '') === active);
+  const active = tab === 'all' || tabs.some((c) => c.id === tab) ? tab : 'all';
+  const rows = !group || active === 'all' ? shown : shown.filter((r) => inGroup(r, group, active));
   const add = async () => {
-    const row = await db.addRow(group && active !== 'all' ? { [group.id]: active || null } : {});
+    const row = await db.addRow(group && active !== 'all' ? { [group.id]: newRowValue(group, active) } : {});
     if (row) navigate(db.rowHref(row.id));
   };
   return (
@@ -64,9 +67,9 @@ function Grouped({ db }: { db: Db }) {
       {group && (
         <div className="seg-strip" role="tablist" aria-label={`Filter by ${group.name}`}>
           <button role="tab" aria-selected={active === 'all'} className={active === 'all' ? 'on' : ''} onClick={() => setTab('all')}>All <b>{shown.length}</b></button>
-          {visible.map((c) => (
+          {tabs.map((c) => (
             <button key={c.id} role="tab" aria-selected={active === c.id} className={active === c.id ? 'on' : ''} onClick={() => setTab(c.id)}>
-              {c.opt ? c.opt.name : `No ${group.name}`} <b>{count(c.id)}</b>
+              {c.label} <b>{counts.get(c.id)}</b>
             </button>
           ))}
         </div>

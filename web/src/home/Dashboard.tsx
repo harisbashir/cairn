@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronRight, GripVertical, LayoutDashboard, MoreHorizontal, Plus, RotateCcw, Trash2, X } from 'lucide-react';
-import { Component, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { Component, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { Widget } from '../../../shared/types.ts';
 import { uid } from '../api.ts';
@@ -10,12 +10,17 @@ import './home.css';
 import { resetHome, saveHome, useHome, type HomeScope } from './hooks.ts';
 import { DEFAULT_WIDGETS, headingOf, KIND, WIDGETS } from './registry.tsx';
 import type { WidgetConfig } from './types.ts';
+import { useReorder, type DropTarget } from './reorder.ts';
 
 const SIZES: { id: Widget['size']; label: string }[] = [
   { id: 'third', label: 'Third' }, { id: 'half', label: 'Half' }, { id: 'two-thirds', label: 'Two-thirds' }, { id: 'full', label: 'Full' },
 ];
 
 type DropSide = 'left' | 'right' | 'top' | 'bottom';
+
+const isFullRow = (el: HTMLElement) => el.getBoundingClientRect().width > (el.parentElement?.clientWidth ?? 0) * 0.9;
+const sideOf = (el: HTMLElement | null, t: DropTarget): DropSide =>
+  el && isFullRow(el) ? (t.before ? 'top' : 'bottom') : (t.before ? 'left' : 'right');
 
 export function Home() {
   const s = useShell();
@@ -25,9 +30,6 @@ export function Home() {
   const [scope, setScope] = useState<HomeScope>('personal');
   const [gallery, setGallery] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ id: string; side: DropSide } | null>(null);
-  const grid = useRef<HTMLDivElement>(null);
 
   const layout = home.data;
   const editing = draft !== null;
@@ -85,30 +87,21 @@ export function Home() {
       ui.toast(`Couldn’t reset Home: ${(err as Error).message}`);
     }
   };
-  const onDragOver = (e: DragEvent<HTMLElement>, id: string) => {
-    if (!dragId) return;
-    e.preventDefault();
-    const r = e.currentTarget.getBoundingClientRect();
-    const fullRow = r.width > (grid.current?.clientWidth ?? 0) * 0.9;
-    const side: DropSide = fullRow
-      ? (e.clientY < r.top + r.height / 2 ? 'top' : 'bottom')
-      : (e.clientX < r.left + r.width / 2 ? 'left' : 'right');
-    if (drop?.id !== id || drop.side !== side) setDrop({ id, side });
-  };
-  const onDrop = () => {
-    if (dragId && drop && dragId !== drop.id) {
-      setDraft((d) => {
-        if (!d) return d;
-        const moving = d.find((w) => w.id === dragId);
-        if (!moving) return d;
-        const rest = d.filter((w) => w.id !== dragId);
-        const at = rest.findIndex((w) => w.id === drop.id) + (drop.side === 'left' || drop.side === 'top' ? 0 : 1);
-        return [...rest.slice(0, at), moving, ...rest.slice(at)];
-      });
-    }
-    setDragId(null);
-    setDrop(null);
-  };
+  const reorder = useReorder({
+    mode: 'handle',
+    ids: widgets.map((w) => w.id),
+    element: (id) => document.getElementById(`hm-w-${id}`),
+    fullRow: isFullRow,
+    onDrop: (dragId, t) => setDraft((d) => {
+      if (!d) return d;
+      const moving = d.find((w) => w.id === dragId);
+      if (!moving) return d;
+      const rest = d.filter((w) => w.id !== dragId);
+      const at = rest.findIndex((w) => w.id === t.id) + (t.before ? 0 : 1);
+      return [...rest.slice(0, at), moving, ...rest.slice(at)];
+    }),
+  });
+  const { dragId, drop } = reorder;
 
   return (
     <>
@@ -118,42 +111,39 @@ export function Home() {
         )}
       </TopBar>
       <div className="content">
-        <div className={`hm-dash${editing ? ' editing' : ''}`}>
+        <div className={`hm-dash${editing ? ' editing' : ''}${dragId ? ' reordering' : ''}`}>
           {stored && widgets.length === 0 && (
             <div className="hm-msg hm-blank">
               {editing ? 'Your Home is empty. Select Add Widget to put something on it.' : 'Your Home is empty. Select Customize to add widgets.'}
             </div>
           )}
-          <div className="hm-grid" ref={grid}>
+          <div className="hm-grid">
             {widgets.map((w, i) => (
               <WidgetFrame
                 key={w.id} widget={w} editing={editing} first={i === 0} last={i === widgets.length - 1}
-                dragging={dragId === w.id} dropSide={drop?.id === w.id && dragId !== w.id ? drop.side : null}
+                dragging={dragId === w.id} dropSide={drop?.id === w.id && dragId !== w.id ? sideOf(document.getElementById(`hm-w-${w.id}`), drop) : null}
                 onChange={(config) => update(w.id, (x) => ({ ...x, config }))}
                 onRename={(title) => update(w.id, (x) => ({ ...x, title }))}
                 onResize={(size) => update(w.id, (x) => ({ ...x, size }))}
                 onMove={(delta) => move(w.id, delta)}
                 onRemove={() => setDraft((d) => d && d.filter((x) => x.id !== w.id))}
-                onDragStart={() => setDragId(w.id)}
-                onDragEnd={() => { setDragId(null); setDrop(null); }}
-                onDragOver={(e) => onDragOver(e, w.id)}
-                onDrop={(e) => { e.preventDefault(); onDrop(); }}
+                onGrip={reorder.bind(w.id).onPointerDown}
               />
             ))}
           </div>
         </div>
         {editing && (
           <div className="hm-bar" role="region" aria-label="Customize Home">
-            <button type="button" className="btn" onClick={() => setGallery(true)}><Plus size={16} />Add Widget</button>
+            <button type="button" className="btn" onClick={() => setGallery(true)} aria-label="Add Widget"><Plus size={16} /><span className="hm-bar-label">Add Widget</span></button>
             <fieldset className="hm-scope">
               <legend className="hm-sr">Who sees this layout</legend>
               <label><input type="radio" name="hm-scope" checked={scope === 'personal'} onChange={() => setScope('personal')} />Just for me</label>
               {layout?.canEditShared && (
-                <label><input type="radio" name="hm-scope" checked={scope === 'workspace'} onChange={() => setScope('workspace')} />For everyone in this workspace</label>
+                <label><input type="radio" name="hm-scope" checked={scope === 'workspace'} onChange={() => setScope('workspace')} /><span className="hm-bar-label">For everyone in this workspace</span><span className="hm-bar-short" aria-hidden>Everyone</span></label>
               )}
             </fieldset>
             {layout?.personal && (
-              <button type="button" className="btn ghost small" onClick={reset}><RotateCcw size={14} />Reset to Workspace Default</button>
+              <button type="button" className="btn ghost small" onClick={reset} aria-label="Reset to Workspace Default" title="Reset to Workspace Default"><RotateCcw size={14} /><span className="hm-bar-label">Reset to Workspace Default</span></button>
             )}
             {scope === 'workspace' && layout?.personal && (
               <span className="subtle hm-bar-note">You’ll keep seeing your own layout until you reset it.</span>
@@ -172,7 +162,7 @@ export function Home() {
 }
 
 function WidgetFrame({
-  widget, editing, first, last, dragging, dropSide, onChange, onRename, onResize, onMove, onRemove, onDragStart, onDragEnd, onDragOver, onDrop,
+  widget, editing, first, last, dragging, dropSide, onChange, onRename, onResize, onMove, onRemove, onGrip,
 }: {
   widget: Widget;
   editing: boolean;
@@ -185,13 +175,9 @@ function WidgetFrame({
   onResize: (size: Widget['size']) => void;
   onMove: (delta: -1 | 1) => void;
   onRemove: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: (e: DragEvent<HTMLElement>) => void;
-  onDrop: (e: DragEvent<HTMLElement>) => void;
+  onGrip: (e: PointerEvent) => void;
 }) {
   const s = useShell();
-  const section = useRef<HTMLElement>(null);
   const kind = KIND.get(widget.type)!;
   const heading = headingOf(widget, s.tree?.nodes ?? []);
   const targetId = kind.target?.(widget);
@@ -199,23 +185,11 @@ function WidgetFrame({
   const cls = ['hm-w', `hm-${widget.size}`, `hm-type-${widget.type}`, dragging && 'dragging', dropSide && `drop-${dropSide}`].filter(Boolean).join(' ');
 
   return (
-    <section
-      ref={section} id={`hm-w-${widget.id}`} className={cls} aria-label={heading}
-      onDragOver={editing ? onDragOver : undefined} onDrop={editing ? onDrop : undefined}
-    >
+    <section id={`hm-w-${widget.id}`} className={cls} aria-label={heading}>
       {editing ? (
         <div className="hm-w-bar">
-          <span
-            className="hm-grip" draggable title="Drag to reorder" aria-hidden
-            onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', heading);
-              if (section.current) e.dataTransfer.setDragImage(section.current, 24, 20);
-              onDragStart();
-            }}
-            onDragEnd={onDragEnd}
-          >
-            <GripVertical size={16} />
+          <span className="hm-grip" title="Drag to reorder" aria-hidden onPointerDown={onGrip}>
+            <GripVertical size={18} />
           </span>
           <kind.icon size={15} className="hm-w-icon" aria-hidden />
           <input

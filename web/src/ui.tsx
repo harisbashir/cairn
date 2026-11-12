@@ -94,7 +94,11 @@ export function useBackToClose(onBack: () => void, on = true) {
   }, [on]);
 }
 
-export function Modal({ children, onClose, className = 'modal', label }: { children: ReactNode; onClose: () => void; className?: string; label: string }) {
+export function Modal({ children, onClose, className = 'modal', label, focusDialog }: {
+  children: ReactNode; onClose: () => void; className?: string; label: string;
+  /** Focus the dialog itself rather than its first field (so a phone keyboard doesn't open). */
+  focusDialog?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
   const close = useRef(onClose);
@@ -104,9 +108,17 @@ export function Modal({ children, onClose, className = 'modal', label }: { child
     const prev = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close.current(); } };
     document.addEventListener('keydown', onKey);
-    const first = ref.current?.querySelector<HTMLElement>('[autofocus], input, textarea, button');
-    first?.focus();
-    return () => { document.removeEventListener('keydown', onKey); prev?.focus?.(); };
+    // The portal mounts its children a render later, so wait for the dialog before moving focus into it.
+    let raf = 0, tries = 0;
+    const focusIn = () => {
+      const box = ref.current;
+      if (!box) { if (++tries < 10) raf = requestAnimationFrame(focusIn); return; }
+      if (box.contains(document.activeElement)) return;
+      const first = focusDialog ? null : (box.querySelector<HTMLElement>('[data-autofocus], [autofocus]') ?? box.querySelector<HTMLElement>('input, textarea, button'));
+      (first ?? box).focus({ preventScroll: true });
+    };
+    focusIn();
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey); prev?.focus?.(); };
   }, []);
   useBackToClose(() => close.current());
   return (
@@ -118,7 +130,7 @@ export function Modal({ children, onClose, className = 'modal', label }: { child
         onPointerDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
         onClick={(e) => { if (e.target === e.currentTarget && downOnBackdrop.current) onClose(); downOnBackdrop.current = false; }}
       >
-        <div ref={ref} className={className} role="dialog" aria-modal="true" aria-label={label}>{children}</div>
+        <div ref={ref} className={className} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>{children}</div>
       </div>
     </FloatingPortal>
   );

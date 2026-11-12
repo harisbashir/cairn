@@ -62,9 +62,22 @@
 
 .hm-w-bar { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; min-width: 0; }
 .hm-grip {
-  display: inline-grid; place-items: center; width: 24px; height: 30px; flex: none; margin-left: -4px;
-  border-radius: var(--r-s); color: var(--text-3); cursor: grab;
+  display: inline-grid; place-items: center; width: 28px; height: 30px; flex: none; margin-left: -4px;
+  border-radius: var(--r-s); color: var(--text-3); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
 }
+/* While a widget is being dragged every widget folds down to its title bar, so the whole layout fits on screen. */
+.hm-dash.reordering .hm-w-body { display: none; }
+.hm-dash.reordering .hm-w-bar { margin-bottom: 0; }
+.hm-dash.reordering .hm-grid { gap: 12px; }
+.hm-dash.reordering .hm-w.drop-top::after { top: -8px; }
+.hm-dash.reordering .hm-w.drop-bottom::after { bottom: -8px; }
+.hm-dash.reordering .hm-w.drop-left::after { left: -8px; }
+.hm-dash.reordering .hm-w.drop-right::after { right: -8px; }
+body.reordering, body.reordering * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+.reorder-ghost { opacity: 0.88; box-shadow: var(--shadow-2) !important; border-radius: var(--r-l); will-change: transform; transition: none !important; }
+.reorder-ghost.hm-w { background: var(--bg-raised); padding: 10px 12px; height: auto !important; }
+.reorder-ghost .hm-w-body { display: none; }
+.reorder-ghost .hm-w-bar { margin: 0; }
 .hm-grip:hover { background: var(--hover); color: var(--text); }
 .hm-grip:active { cursor: grabbing; }
 .hm-w-icon { flex: none; color: var(--text-3); }
@@ -85,6 +98,7 @@
 .hm-scope label:has(input:checked) { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow-1); }
 .hm-scope input { margin: 0; accent-color: var(--accent); }
 .hm-bar-note { max-width: 260px; }
+.hm-bar-short { display: none; }
 .hm-bar-actions { display: flex; gap: 8px; }
 .hm-bar-actions .btn { min-width: 84px; }
 
@@ -128,48 +142,55 @@
 .hm-cal-day .feed-row { border-top: 0; padding-top: 6px; padding-bottom: 6px; }
 .hm-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
 
-/* Sticky notes */
+/* Sticky notes: flat squares of colour on the wall; tap one to read or edit it in a sheet. */
 .hm-wall {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 200px)); gap: 18px 16px;
-  margin: 0; padding: 6px 2px 4px; list-style: none;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px;
+  margin: 0; padding: 0; list-style: none;
 }
 .hm-sticky {
-  position: relative; display: flex; flex-direction: column; min-height: 168px; padding: 18px 14px 8px;
-  border-radius: 3px 3px 10px 3px;
-  box-shadow: 0 1px 1px rgba(20, 24, 36, 0.08), 0 8px 18px -10px rgba(20, 24, 36, 0.45);
-  transform: rotate(-1deg); transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.12s;
+  position: relative; display: flex; flex-direction: column; gap: 10px; height: 176px; padding: 14px 14px 10px;
+  border-radius: var(--r-l); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 10%, transparent);
+  -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s;
 }
-.hm-sticky:nth-child(even) { transform: rotate(1deg); }
-.hm-sticky:nth-child(3n) { transform: rotate(-0.5deg); }
-.hm-sticky:focus-within { transform: none; box-shadow: 0 1px 1px rgba(20, 24, 36, 0.1), 0 12px 24px -10px rgba(20, 24, 36, 0.5); }
-.hm-sticky.dragging { opacity: 0.4; }
+.hm-sticky:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent), var(--shadow-2); }
+.hm-sticky:has(.hm-sticky-open:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hm-sticky-open { position: absolute; inset: 0; z-index: 1; width: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+.hm-sticky-open:focus { outline: none; }
+.hm-sticky.dragging { opacity: 0.35; }
 .hm-sticky.drop-before::after, .hm-sticky.drop-after::after {
-  content: ''; position: absolute; top: 4px; bottom: 4px; width: 4px; border-radius: 2px; background: var(--accent);
+  content: ''; position: absolute; top: 6px; bottom: 6px; width: 4px; border-radius: 2px; background: var(--accent);
 }
-.hm-sticky.drop-before::after { left: -10px; }
-.hm-sticky.drop-after::after { right: -10px; }
-.hm-tape {
-  position: absolute; top: -7px; left: 50%; width: 64px; height: 18px; margin-left: -32px; border-radius: 2px;
-  background: color-mix(in srgb, var(--bg-raised) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
-  cursor: grab;
-}
-.hm-tape:active { cursor: grabbing; }
+.hm-sticky.drop-before::after { left: -8px; }
+.hm-sticky.drop-after::after { right: -8px; }
 .hm-sticky-text {
-  flex: 1; display: block; width: 100%; min-height: 96px; margin: 0; padding: 0; border: 0; background: transparent; color: inherit;
-  font: 14px/1.45 var(--font); resize: none; overflow: hidden; outline: none; white-space: pre-wrap; overflow-wrap: anywhere;
+  flex: 1; min-height: 0; overflow: hidden; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.hm-sticky-text::placeholder { color: currentColor; opacity: 0.6; }
-.hm-sticky:has(.hm-sticky-text:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
-.hm-sticky-foot { display: flex; align-items: center; gap: 6px; min-height: 28px; margin-top: 8px; font-size: 12px; }
-.hm-sticky-foot .grow { opacity: 0.85; }
+.hm-sticky-text b { display: block; margin-bottom: 2px; font-weight: 650; font-size: 15px; }
+.hm-sticky-text.clipped { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.hm-sticky-empty { opacity: 0.6; }
+.hm-sticky-foot { display: flex; align-items: center; gap: 6px; min-height: 22px; font-size: 12px; }
+.hm-sticky-foot .grow { opacity: 0.8; }
 .hm-initial {
   display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: 50%;
   background: color-mix(in srgb, currentColor 16%, transparent); font-size: 11px; font-weight: 700;
 }
 .hm-private { display: inline-flex; flex: none; }
-.hm-sticky-menu.icon-btn { color: inherit; }
-.hm-sticky-menu.icon-btn:hover { background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; }
-.hm-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 9px 8px; }
+.reorder-ghost.hm-sticky { overflow: hidden; }
+
+/* Note sheet */
+.modal.hm-note-sheet { width: min(560px, 100%); gap: 12px; padding: 12px; }
+.hm-note-paper { padding: 16px 18px; border-radius: var(--r-m); }
+.hm-note-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 2px 0 6px; font-size: 13px; color: var(--text-2); }
+.hm-note-head b { color: var(--text); font-weight: 600; }
+.hm-note-head .btn { min-width: 76px; }
+.hm-note-area {
+  display: block; width: 100%; height: min(52vh, 440px); margin: 0; padding: 0; border: 0; background: transparent; color: inherit;
+  font: 16px/1.5 var(--font); resize: none; outline: none; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.hm-note-area::placeholder { color: currentColor; opacity: 0.55; }
+.hm-note-bar { display: flex; align-items: center; gap: 8px; padding: 0 4px 2px; }
+.hm-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
 .hm-swatch {
   display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
@@ -179,27 +200,39 @@
 .menu-label.hm-wrap { max-width: 240px; font-weight: 500; line-height: 1.4; }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-sticky, .hm-sticky:nth-child(even), .hm-sticky:nth-child(3n) { transform: none; }
+  .hm-sticky, .hm-sticky:hover { transform: none; transition: none; }
 }
 
 @media (max-width: 760px) {
   .hm-dash { padding: 24px 16px 60px; }
   .hm-grid { gap: 28px; }
   .hm-welcome h1 { font-size: 26px; }
-  .hm-wall { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
-  .hm-sticky, .hm-sticky:nth-child(even), .hm-sticky:nth-child(3n) { transform: none; min-height: 150px; }
-  .hm-sticky-text { font-size: 16px; }
+  .hm-wall { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .hm-sticky { height: 164px; }
+  .hm-sticky:hover { transform: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 10%, transparent); }
+  .hm-sticky-text { font-size: 15px; }
+  .hm-sticky-text b { font-size: 16px; }
   .hm-sticky-menu.icon-btn, .hm-w-bar .icon-btn { width: 44px; height: 44px; }
+  .modal.hm-note-sheet { padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .hm-note-area { height: 46vh; font-size: 17px; }
+  .hm-swatches { gap: 6px; }
   .hm-swatch { width: 40px; height: 40px; }
+  .hm-note-head .btn { min-height: 44px; }
   .hm-dash input.input, .hm-dash select.select, .hm-dash textarea.input, .hm-bar select { font-size: 16px; }
   .hm-dash .btn.small { min-height: 44px; }
-  .hm-grip { display: none; }
-  .hm-bar { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .hm-grip { width: 44px; height: 44px; margin: -6px 0 -6px -10px; }
+  /* Two compact rows on a phone: who sees it, then Add / Reset / Cancel / Done. */
+  .hm-bar { gap: 8px; padding: 8px 12px; }
   .hm-bar .grow { display: none; }
-  .hm-scope { width: 100%; }
-  .hm-scope label { flex: 1; min-height: 44px; justify-content: center; }
-  .hm-bar-actions { width: 100%; }
-  .hm-bar-actions .btn { flex: 1; min-height: 44px; }
+  .hm-scope { order: -1; width: 100%; flex-wrap: nowrap; }
+  .hm-scope label { flex: 1; min-height: 40px; justify-content: center; padding: 0 8px; font-size: 14px; }
+  .hm-bar .btn { min-height: 44px; }
+  .hm-bar-label { display: none; }
+  .hm-bar-short { display: inline; }
+  .hm-bar > .btn { min-width: 44px; padding: 0 12px; }
+  .hm-bar-note { order: -1; max-width: none; font-size: 12.5px; }
+  .hm-bar-actions { flex: 1; }
+  .hm-bar-actions .btn { flex: 1; min-width: 0; }
   .hm-gallery-grid { grid-template-columns: 1fr; }
   .hm-link-row { grid-template-columns: 1fr auto; }
   .hm-link-row input:nth-child(2) { grid-column: 1; }

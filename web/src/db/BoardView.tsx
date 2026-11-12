@@ -1,28 +1,27 @@
 import { ArrowLeft, ArrowRight, EyeOff, Kanban, MoreHorizontal, Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Property, SelectOption } from '../../../shared/types.ts';
+import type { Property } from '../../../shared/types.ts';
 import { uid } from '../api.ts';
 import { MenuItem, Popover } from '../ui.tsx';
 import { CardMeta, Chip, type Db } from './kit.tsx';
-
-/** Board columns in the view's own order: option ids left to right, '' is the "no value" column. */
-export function boardColumns(db: Pick<Db, 'view'>, group: Property): { id: string; opt: SelectOption | null }[] {
-  const all = [...(group.options ?? []).map((o) => ({ id: o.id, opt: o as SelectOption | null })), { id: '', opt: null }];
-  const order = db.view.columnOrder ?? [];
-  const rank = (id: string) => { const i = order.indexOf(id); return i === -1 ? order.length + all.findIndex((c) => c.id === id) : i; };
-  return all.sort((a, b) => rank(a.id) - rank(b.id)).filter((c) => !(db.view.hiddenColumns ?? []).includes(c.id));
-}
+import { allGroupLabel, canMoveBetween, groupableProps, groupsFor, inGroup, moveValue, newRowValue, type Group } from './groups.ts';
 
 export function BoardView({ db }: { db: Db }) {
   const { view, schema, shown, canEdit } = db;
-  const group = schema.find((p) => p.id === view.groupBy && (p.type === 'select' || p.type === 'status'));
-  const drag = useRef<{ kind: 'card' | 'col'; id: string } | null>(null);
+  const group = groupableProps(schema).find((p) => p.id === view.groupBy);
+  const drag = useRef<{ kind: 'card' | 'col'; id: string; from?: string } | null>(null);
   const [over, setOver] = useState<{ col: string; card?: string; side?: 'left' | 'right' } | null>(null);
 
   if (!group) {
     return (
-      <div className="empty"><Kanban size={22} />A board groups rows by a Select or Status property.
+      <div className="empty"><Kanban size={22} />A board groups rows by one of their properties.
+        {groupableProps(schema).length > 0 && (
+          <select className="select small" aria-label="Group cards by" value="" onChange={(e) => e.target.value && db.setView({ groupBy: e.target.value, columnOrder: undefined, hiddenColumns: undefined })}>
+            <option value="">Group cards by…</option>
+            {groupableProps(schema).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
         {canEdit && <button className="btn" onClick={() => {
           const p: Property = { id: uid(), name: 'Status', type: 'status', options: [{ id: uid(), name: 'Not started', color: 'gray' }, { id: uid(), name: 'In progress', color: 'blue' }, { id: uid(), name: 'Done', color: 'green' }] };
           db.setSchema([...schema, p]); setTimeout(() => db.setView({ groupBy: p.id }), 60);
@@ -30,7 +29,10 @@ export function BoardView({ db }: { db: Db }) {
       </div>
     );
   }
-  const columns = boardColumns(db, group);
+  const columns = groupsFor(group, shown, view, db);
+  const movable = canMoveBetween(group);
+  const head = (g: Group) => g.opt ? <Chip opt={g.opt} status={group.type === 'status'} /> : g.color ? <span className={`marker ${g.color}`}>{g.label}</span> : <span className={g.id ? 'col-label' : 'muted'}>{g.label}</span>;
+  const addTo = (id: string) => db.addRow({ [group.id]: newRowValue(group, id) });
   const hidden = view.hiddenColumns ?? [];
   const ids = columns.map((c) => c.id);
   const moveColumn = (id: string, to: number) => {
@@ -43,14 +45,14 @@ export function BoardView({ db }: { db: Db }) {
   return (
     <div className="board" onDragEnd={end}>
       {columns.map((col, index) => {
-        const rows = shown.filter((r) => String(r.props[group.id] ?? '') === col.id);
-        if (!col.opt && rows.length === 0) return null;
-        const name = col.opt?.name ?? `No ${group.name}`;
+        const rows = shown.filter((r) => inGroup(r, group, col.id));
+        if (!col.opt && group.type !== 'checkbox' && rows.length === 0) return null;
+        const name = col.label;
         const isOver = over?.col === col.id;
         return (
           <section
             key={col.id} aria-label={name}
-            className={`col${isOver && drag.current?.kind === 'card' && !over?.card ? ' over' : ''}${isOver && over?.side ? ` drop-${over.side}` : ''}`}
+            className={`col${isOver && drag.current?.kind === 'card' && !over?.card && (movable || drag.current.from === col.id) ? ' over' : ''}${isOver && over?.side ? ` drop-${over.side}` : ''}`}
             onDragOver={(e) => {
               const d = drag.current; if (!d) return;
               e.preventDefault();
@@ -70,13 +72,14 @@ export function BoardView({ db }: { db: Db }) {
                 moveColumn(d.id, without.indexOf(col.id) + (o.side === 'right' ? 1 : 0));
               } else {
                 const moving = shown.find((r) => r.id === d.id);
-                if (moving && String(moving.props[group.id] ?? '') !== col.id) db.patchRow(d.id, { props: { [group.id]: col.id || null } });
+                if (d.from !== col.id && !movable) return;
+                if (moving && d.from !== undefined && !inGroup(moving, group, col.id)) db.patchRow(d.id, { props: { [group.id]: moveValue(moving, group, d.from, col.id) } });
                 if (o?.card && o.card !== d.id) db.moveRow(d.id, o.card);
               }
             }}
           >
             <header className="col-head" draggable={canEdit} onDragStart={(e) => { drag.current = { kind: 'col', id: col.id }; e.dataTransfer.effectAllowed = 'move'; }} title={canEdit ? 'Drag to move this column' : undefined}>
-              {col.opt ? <Chip opt={col.opt} status={group.type === 'status'} /> : <span className="muted">{name}</span>}
+              {head(col)}
               <span className="n">{rows.length}</span><span className="grow" />
               {canEdit && (
                 <>
@@ -85,15 +88,15 @@ export function BoardView({ db }: { db: Db }) {
                     <MenuItem icon={<ArrowRight size={16} />} onClick={() => moveColumn(col.id, index + 1)}>Move Right</MenuItem>
                     <MenuItem icon={<EyeOff size={16} />} onClick={() => db.setView({ hiddenColumns: [...hidden, col.id] })}>Hide Column</MenuItem>
                   </Popover>
-                  <button className="icon-btn" aria-label={`Add to ${name}`} onClick={() => db.addRow({ [group.id]: col.id || null })}><Plus size={15} /></button>
+                  <button className="icon-btn" aria-label={`Add to ${name}`} onClick={() => addTo(col.id)}><Plus size={15} /></button>
                 </>
               )}
             </header>
             <div className="col-cards">
               {rows.map((r) => (
                 <Link
-                  key={r.id} to={db.rowHref(r.id)} className={`kcard${over?.card === r.id ? ' drop-after' : ''}`} draggable={canEdit}
-                  onDragStart={(e) => { e.stopPropagation(); drag.current = { kind: 'card', id: r.id }; e.dataTransfer.effectAllowed = 'move'; }}
+                  key={r.id} to={db.rowHref(r.id)} title={r.title || 'Untitled'} className={`kcard${over?.card === r.id ? ' drop-after' : ''}`} draggable={canEdit}
+                  onDragStart={(e) => { e.stopPropagation(); drag.current = { kind: 'card', id: r.id, from: col.id }; e.dataTransfer.effectAllowed = 'move'; }}
                   onDragOver={(e) => { if (drag.current?.kind === 'card' && drag.current.id !== r.id) { e.preventDefault(); e.stopPropagation(); setOver({ col: col.id, card: r.id }); } }}
                 >
                   <span className="t">{r.icon && <span className="emoji ico">{r.icon}</span>}{r.title || 'Untitled'}</span>
@@ -101,7 +104,7 @@ export function BoardView({ db }: { db: Db }) {
                 </Link>
               ))}
             </div>
-            {canEdit && <button className="add-row col-add" onClick={() => db.addRow({ [group.id]: col.id || null })}><Plus size={15} />New</button>}
+            {canEdit && <button className="add-row col-add" onClick={() => addTo(col.id)}><Plus size={15} />New</button>}
           </section>
         );
       })}
@@ -110,7 +113,7 @@ export function BoardView({ db }: { db: Db }) {
           <div className="col-head"><span className="muted">Hidden columns</span></div>
           {hidden.map((id) => {
             const opt = group.options?.find((o) => o.id === id);
-            return <button key={id} className="add-row col-add" onClick={() => db.setView({ hiddenColumns: hidden.filter((h) => h !== id) })}>{opt ? <Chip opt={opt} status={group.type === 'status'} /> : `No ${group.name}`}<span className="grow" />Show</button>;
+            return <button key={id} className="add-row col-add" onClick={() => db.setView({ hiddenColumns: hidden.filter((h) => h !== id) })}>{opt ? <Chip opt={opt} status={group.type === 'status'} /> : <span className="clip">{allGroupLabel(group, id, db)}</span>}<span className="grow" />Show</button>;
           })}
         </div>
       )}

@@ -13,6 +13,7 @@ import { ChartView } from './ChartView.tsx';
 import { FeedView } from './FeedView.tsx';
 import { GalleryView } from './GalleryView.tsx';
 import { COLORS, PropIcon, useRelTitles, type Db } from './kit.tsx';
+import { groupableProps } from './groups.ts';
 import { ListView } from './ListView.tsx';
 import { FieldsMenu, FilterMenu, SortMenu } from './menus.tsx';
 import { PhoneView } from './PhoneView.tsx';
@@ -166,11 +167,12 @@ function PropSelect({ label, value, onChange, props, none }: { label: string; va
 
 function ViewMenu({ db, canDelete, onDelete }: { db: Db; canDelete: boolean; onDelete: () => void }) {
   const { view: v, schema, setView } = db;
-  const groupable = schema.filter((p) => p.type === 'select' || p.type === 'status');
+  const phone = useIsPhone();
+  const groupable = groupableProps(schema);
   const dates = schema.filter((p) => p.type === 'date');
   const numbers = schema.filter((p) => p.type === 'number');
   const chartable = schema.filter((p) => ['select', 'status', 'multi_select', 'checkbox', 'person', 'relation', 'date'].includes(p.type));
-  const chart: ChartConfig = v.chart ?? { kind: 'bar', groupBy: groupable[0]?.id ?? 'createdAt', measure: 'count' };
+  const chart: ChartConfig = v.chart ?? { kind: 'bar', groupBy: chartable[0]?.id ?? 'createdAt', measure: 'count' };
   const setChart = (p: Partial<ChartConfig>) => setView({ chart: { ...chart, ...p } });
   const addDate = () => { const p: Property = { id: uid(), name: 'Date', type: 'date' }; db.setSchema([...schema, p]); setTimeout(() => setView({ dateProp: p.id }), 60); };
   const addStatus = () => { const p: Property = { id: uid(), name: 'Status', type: 'status', options: STATUS_OPTIONS() }; db.setSchema([...schema, p]); setTimeout(() => setView({ groupBy: p.id }), 60); };
@@ -186,6 +188,9 @@ function ViewMenu({ db, canDelete, onDelete }: { db: Db; canDelete: boolean; onD
         {v.type === 'board' && (groupable.length
           ? <PropSelect label="Group cards by" value={v.groupBy} onChange={(id) => setView({ groupBy: id, columnOrder: undefined, hiddenColumns: undefined })} props={groupable} />
           : <button className="btn small" onClick={addStatus}><Plus size={14} />Add a Status Property</button>)}
+        {phone && ['table', 'list'].includes(v.type) && v.phone !== 'same' && groupable.length > 0 && (
+          <PropSelect label="Group cards by" value={v.groupBy} onChange={(id) => setView({ groupBy: id, columnOrder: undefined, hiddenColumns: undefined })} props={groupable} none={groupable.some((p) => p.type === 'status') ? 'Status' : 'No grouping'} />
+        )}
         {(v.type === 'calendar' || v.type === 'timeline') && (dates.length
           ? <PropSelect label={v.type === 'timeline' ? 'Starts on' : 'Show rows on'} value={v.dateProp} onChange={(id) => setView({ dateProp: id })} props={dates} />
           : <button className="btn small" onClick={addDate}><Plus size={14} />Add a Date Property</button>)}

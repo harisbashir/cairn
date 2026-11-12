@@ -150,11 +150,11 @@ export interface View {
   type: ViewType;
   filters: Filter[];
   sorts: Sort[];
-  groupBy?: string; // board: a select/status property id
+  groupBy?: string; // board + phone card list: any property id (multi-value properties put a row in several groups; dates group by month)
   hidden?: string[]; // hidden property ids
   widths?: Record<string, number>; // table column widths in px
   cardProps?: string[]; // property ids shown on cards (board, gallery, list, calendar, feed, phone). Unset = sensible default.
-  columnOrder?: string[]; // board: option ids left to right ('' = the "no value" column)
+  columnOrder?: string[]; // board: group ids left to right (option, user, linked row, 'yes'/'no', 'YYYY-MM' or the value; '' = no value)
   hiddenColumns?: string[]; // board: option ids not shown
   dateProp?: string; // calendar + timeline: start date property id
   endDateProp?: string; // timeline: optional end date property id
