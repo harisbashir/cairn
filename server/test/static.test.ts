@@ -1,0 +1,26 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from '../src/app.ts';
+let dir: string | undefined;
+afterEach(() => { vi.restoreAllMocks(); if (dir) rmSync(dir, { recursive: true, force: true }); });
+it('serves built assets and the SPA while reserving backend namespaces', async () => {
+  dir = mkdtempSync(join(tmpdir(), 'cairn-static-'));
+  const root = join(dir, 'dist/web');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'index.html'), '<html>Cairn</html>');
+  writeFileSync(join(root, 'app.js'), 'console.log("Cairn");');
+  vi.spyOn(process, 'cwd').mockReturnValue(dir);
+  const app = createApp({ dataDir: join(dir, 'data') });
+  const index = await app.request('/workspace/opaque-page-id');
+  expect(index.status).toBe(200);
+  expect(await index.text()).toBe('<html>Cairn</html>');
+  const js = await app.request('/app.js');
+  expect(js.headers.get('content-type')).toContain('javascript');
+  expect(await js.text()).toContain('console.log');
+  expect((await app.request('/files/unknown/file.txt')).status).toBe(404);
+  expect((await app.request('/api/unknown')).status).toBe(401);
+  expect((await app.request('/mcp')).status).toBe(401);
+  expect((await app.request('/..%2Fsecret')).status).toBe(404);
+});

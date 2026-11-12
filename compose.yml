@@ -1,0 +1,14 @@
+services:
+  cairn:
+    build: .
+    image: cairn:latest
+    restart: unless-stopped
+    ports:
+      - "${CAIRN_BIND:-0.0.0.0:80}:8080"
+    environment:
+      CAIRN_PUBLIC_URL: ${CAIRN_PUBLIC_URL:-}
+      CAIRN_SECURE_COOKIES: ${CAIRN_SECURE_COOKIES:-}
+    volumes:
+      - cairn-data:/data
+volumes:
+  cairn-data:
