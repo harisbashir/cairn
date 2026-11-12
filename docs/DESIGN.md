@@ -31,3 +31,19 @@ design principles apply; Apple platform conventions do not).
 
 Mark: three stacked stones, the top one in the accent colour. Files in `brand/`. The mark appears
 once per screen at most (sign-in, public pages); inside the app the workspace's own badge leads.
+
+## Additions in 0.2
+
+- **Appearance is a preference.** System is the default; people may pin Light or Dark and pick one
+  of six accents. Every accent has a light and a dark value that keeps 4.5:1 on its surface.
+- **Phones get their own layout, chosen by width.** A five-item tab bar (Home, Pages, New, Search,
+  More) replaces the sidebar. Wide views (table, board, list) become one group at a time as large
+  cards with a scrolling group strip; calendar and timeline become an agenda. Menus are bottom
+  sheets. Targets are at least 44 px and inputs 16 px so iOS does not zoom.
+- **Cards show little.** A card carries its title, the owning project as a coloured marker (the
+  same project always wears the same colour, and always with its name), then status, dates and
+  people. Long text and links stay on the row's page. Each view chooses its card properties.
+- **Board columns move** by dragging the header or with Move Left / Move Right in the column menu,
+  so the action never depends on drag alone.
+- **Home is a dashboard of widgets** on a six-column grid. Editing is an explicit mode with Done
+  and Cancel; nothing rearranges by accident. Sticky notes are plain, quick, and belong to no page.

@@ -106,7 +106,14 @@ function PageView({ page }: { page: Page }) {
     const el = titleRef.current;
     if (el) { el.style.height = '0'; el.style.height = `${el.scrollHeight}px`; }
   }, [title]);
-  useEffect(() => { if (!page.title && canEdit) titleRef.current?.focus(); }, [page.id, page.title, canEdit]);
+  // A new page starts in its title. Menus hand focus back to their button when they close, so claim it after that too.
+  useEffect(() => {
+    if (page.title || !canEdit) return;
+    titleRef.current?.focus();
+    const t = setTimeout(() => { if (!document.activeElement?.closest('.tiptap')) titleRef.current?.focus(); }, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page.id, canEdit]);
   useEffect(() => { document.title = `${title || 'Untitled'} · Cairn`; return () => { document.title = 'Cairn'; }; }, [title]);
 
   const setTitleSaved = (v: string) => {
