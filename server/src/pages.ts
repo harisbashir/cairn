@@ -96,15 +96,17 @@ export class Pages {
   }
 
   index(page: Page): void {
-    const propertyText: string[] = Object.values(page.props).flat().map(value => String(value ?? ''));
+    // Index what a person would read: option names instead of ids, and no user or row ids.
+    const propertyText: string[] = [];
     const schema = page.kind === 'row' && page.parentId ? this.s.get<Page>('pages', page.parentId)?.schema ?? [] : [];
     for (const property of schema) {
       const value = page.props[property.id];
-      const values = Array.isArray(value) ? value : [value];
-      for (const item of values) {
-        if (typeof item !== 'string') continue;
-        const option = property.options?.find(option => option.id === item);
-        if (option) propertyText.push(option.name);
+      if (value === null || value === undefined || property.type === 'person' || property.type === 'relation' || property.type === 'checkbox') continue;
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (property.options) {
+          const option = property.options.find(option => option.id === item);
+          if (option) propertyText.push(option.name);
+        } else propertyText.push(String(item));
       }
     }
     this.s.db.prepare('DELETE FROM search WHERE id=?').run(page.id);

@@ -79,7 +79,7 @@ export function PropValueEditor({ prop, value, editable, users, wid, onChange, o
     return <label className="cell"><input type="checkbox" checked={!!value} aria-label={prop.name} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} /></label>;
   }
   if (prop.type === 'date') {
-    return <input className="cell-input" type="date" aria-label={prop.name} value={value ? String(value).slice(0, 10) : ''} onChange={(e) => onChange(e.target.value || null)} />;
+    return <input className={`cell-input${value ? '' : ' blank'}`} type="date" aria-label={prop.name} value={value ? String(value).slice(0, 10) : ''} onChange={(e) => onChange(e.target.value || null)} />;
   }
 
   const multi = isMulti(prop.type);

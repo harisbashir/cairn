@@ -147,6 +147,7 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
   const dirty = useRef(false);
+  const touched = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -175,7 +176,8 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
     extensions,
     content: content ?? undefined,
     editable,
-    onUpdate: ({ editor }) => { dirty.current = true; onChangeRef.current(editor.getJSON() as DocNode); },
+    // Ignore the editor's own normalisation on load; only save after the person has touched the page.
+    onUpdate: ({ editor }) => { if (!touched.current) return; dirty.current = true; onChangeRef.current(editor.getJSON() as DocNode); },
   });
 
   // Adopt the server copy when someone else (or an AI agent) changed the page and we have nothing unsaved.
@@ -202,6 +204,10 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
 
   return (
     <div
+      onPointerDownCapture={() => { touched.current = true; }}
+      onKeyDownCapture={() => { touched.current = true; }}
+      onPasteCapture={() => { touched.current = true; }}
+      onDropCapture={() => { touched.current = true; }}
       onClick={(e) => {
         const a = (e.target as HTMLElement).closest('a');
         if (!a) return;
