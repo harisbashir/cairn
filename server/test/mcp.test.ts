@@ -50,6 +50,21 @@ describe('MCP in-process Streamable HTTP', () => {
     expect(deletion.status).toBe(200);
   });
 
+  it('enforces the HTTP title limit before MCP creates or updates pages', async () => {
+    const tooLong = 'x'.repeat(10001);
+    expect((await api(`/api/workspaces/${workspaceId}/pages`, 'POST', { title: tooLong })).status).toBe(400);
+    expect((await call('create_page', { workspace_id: workspaceId, title: tooLong })).isError).toBe(true);
+    expect((await call('create_database', { workspace_id: workspaceId, title: tooLong, properties: [] })).isError).toBe(true);
+    const page = result(await call('create_page', { workspace_id: workspaceId, title: 'Original' }));
+    expect((await call('update_page', { page_id: page.id, title: tooLong })).isError).toBe(true);
+    expect(result(await call('get_page', { page_id: page.id })).title).toBe('Original');
+    const database = result(await call('create_database', { workspace_id: workspaceId, title: 'Database', properties: [] }));
+    expect((await call('update_database', { database_id: database.id, title: tooLong })).isError).toBe(true);
+    expect((await call('create_row', { database_id: database.id, title: tooLong })).isError).toBe(true);
+    const row = result(await call('create_row', { database_id: database.id, title: 'Row' }));
+    expect((await call('update_row', { row_id: row.id, title: tooLong })).isError).toBe(true);
+  });
+
   it('runs the page tools and records AI edits', async () => {
     const page = result(await call('create_page', { workspace_id: workspaceId, title: 'Knowledge', markdown: '# Body', icon: '📚' }));
     expect(page.markdown).toContain('# Body');

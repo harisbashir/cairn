@@ -58,7 +58,7 @@ export function registerAssets(app: Hono<Env>, pages: Pages) {
     c.header('Content-Type', type);
     c.header('Cache-Control','private, max-age=31536000, immutable');
     c.header('X-Content-Type-Options', 'nosniff');
-    c.header('Content-Disposition', `${(/^(image\/(?!svg\+xml)|audio\/|video\/)/.test(type) || type === 'application/pdf') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    c.header('Content-Disposition', `${(/^(image\/(?!svg\+xml)|audio\/|video\/)/i.test(type) || type === 'application/pdf') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     return c.body(new Uint8Array(bytes));
   });
 }

@@ -39,6 +39,8 @@ function defaultsFor(type: ViewType, schema: Property[], current: Partial<View> 
   const group = schema.find((p) => p.type === 'status') ?? schema.find((p) => p.type === 'select');
   const date = schema.find((p) => p.type === 'date');
   const out: Partial<View> = { type };
+  // A view still carrying its old type's default name ("Table") follows the new type, so a board isn't called Table.
+  if (current.type && current.name === VIEWS[current.type].label) out.name = VIEWS[type].label;
   if (type === 'board' && !current.groupBy) out.groupBy = group?.id;
   if ((type === 'calendar' || type === 'timeline') && !current.dateProp) out.dateProp = date?.id;
   if (type === 'chart' && !current.chart) out.chart = { kind: 'bar', groupBy: group?.id ?? 'createdAt', measure: 'count' };
@@ -144,7 +146,7 @@ export function DatabaseView({ page, canEdit, save }: { page: Page; canEdit: boo
         <FilterMenu db={db} />
         <SortMenu db={db} />
         <FieldsMenu db={db} />
-        {canEdit && <button className="btn primary small" onClick={focusNew}><Plus size={15} />New</button>}
+        {canEdit && <button className="btn primary small db-new" aria-label="New row" onClick={focusNew}><Plus size={15} /><span>New</span></button>}
       </div>
       {loading ? null : <ViewBody db={db} />}
     </div>

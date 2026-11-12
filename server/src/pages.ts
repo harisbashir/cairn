@@ -89,14 +89,24 @@ export class Pages {
       page.workspaceId === workspaceId && page.parentId === parentId && page.id !== exclude &&
       ![...this.ancestors(page), page].some(ancestor => ancestor.deletedAt))
       .sort((a, b) => a.position - b.position);
-    if (afterId === null) return (siblings[0]?.position ?? 1) - 1;
-    if (afterId === undefined) return (siblings.at(-1)?.position ?? 0) + 1;
-    const preceding = this.get(actor, afterId);
-    if (preceding.parentId !== parentId || preceding.workspaceId !== workspaceId || preceding.id === exclude)
-      fail(400, 'The preceding page must be a sibling.');
-    const index = siblings.findIndex(page => page.id === preceding.id);
-    if (index < 0) fail(400, 'The preceding page must be a sibling.');
-    return (siblings[index].position + (siblings[index + 1]?.position ?? siblings[index].position + 2)) / 2;
+    let index = afterId === null ? -1 : siblings.length - 1;
+    if (afterId !== null && afterId !== undefined) {
+      const preceding = this.get(actor, afterId);
+      if (preceding.parentId !== parentId || preceding.workspaceId !== workspaceId || preceding.id === exclude)
+        fail(400, 'The preceding page must be a sibling.');
+      index = siblings.findIndex(page => page.id === preceding.id);
+      if (index < 0) fail(400, 'The preceding page must be a sibling.');
+    }
+    const between = () => {
+      const left = siblings[index]?.position, right = siblings[index + 1]?.position;
+      const value = left === undefined ? (right === undefined ? (afterId === null ? 0 : 1) : right - 1) : right === undefined ? left + 1 : left + (right - left) / 2;
+      return Number.isFinite(value) && value > (left ?? -Infinity) && value < (right ?? Infinity) ? value : null;
+    };
+    const position = between();
+    if (position !== null) return position;
+    // Reclaim float precision before a midpoint collapses onto either neighbour.
+    siblings.forEach((page, i) => { page.position = i + 1; this.s.put('pages', page); });
+    return between()!;
   }
 
   index(page: Page): void { this.s.indexPage(page); }
@@ -173,6 +183,7 @@ export class Pages {
 
   patch(actor: Actor, pageId: string, input: PagePatch): StoredPage {
     const page = this.get(actor, pageId, true);
+    const previousSchema = page.schema;
     this.validateFields(page.kind, input);
     if (input.title !== undefined || input.content !== undefined) this.snapshot(actor, page);
     if (input.props) {
@@ -183,11 +194,26 @@ export class Pages {
     }
     const { props, ...rest } = input;
     Object.assign(page, rest);
-    const result = this.change(actor, page, 'updated');
-    if (page.kind === 'database' && input.schema !== undefined) {
-      for (const row of this.s.all<Page>('pages').filter(row => row.parentId === page.id && row.kind === 'row')) this.index(row);
-    }
-    return result;
+    const save = () => {
+      const result = this.change(actor, page, 'updated');
+      if (page.kind === 'database' && input.schema !== undefined) {
+        for (const row of this.s.all<Page>('pages').filter(row => row.parentId === page.id && row.kind === 'row')) {
+          for (const oldProperty of previousSchema) {
+            const property = page.schema.find(property => property.id === oldProperty.id);
+            if (!property) { delete row.props[oldProperty.id]; continue; }
+            if (!['select', 'status', 'multi_select'].includes(property.type)) continue;
+            const removed = new Set(oldProperty.options?.filter(option => !property.options?.some(next => next.id === option.id)).map(option => option.id));
+            const value = row.props[property.id];
+            if (Array.isArray(value)) row.props[property.id] = value.filter(option => !removed.has(option));
+            else if (typeof value === 'string' && removed.has(value)) delete row.props[property.id];
+          }
+          this.s.put('pages', row);
+          this.index(row);
+        }
+      }
+      return result;
+    };
+    return input.schema !== undefined ? this.s.transaction(save) : save();
   }
 
   move(actor: Actor, pageId: string, parentId: string | null, afterId?: string | null): StoredPage {

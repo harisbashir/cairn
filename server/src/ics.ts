@@ -45,7 +45,7 @@ export function parseICS(text: string, from: string, to: string): ICSEvent[] {
     const startField = field('DTSTART'); if(!startField) continue;
     const start = stamp(startField); if(!start) continue;
     const endField = field('DTEND'); const end = endField ? stamp(endField) : null;
-    const duration = end ? Math.max(0,end.wall-start.wall) : start.allDay ? day : 0;
+    const duration = end ? Math.max(0,end.wall-start.wall,instant(end)-instant(start)) : start.allDay ? day : 0;
     const exclusions = new Set(fields.filter(f=>f.name==='EXDATE').flatMap(f=>f.value.split(',').map(value=>stamp({...f,value}))).filter((s): s is Stamp=>!!s).map(s=>instant(s)));
     const rule: Record<string,string> = Object.fromEntries((field('RRULE')?.value ?? '').split(';').map(part=>part.split('=')));
     const freq = rule.FREQ; const interval = Math.max(1,parseInt(rule.INTERVAL)||1);
@@ -57,9 +57,10 @@ export function parseICS(text: string, from: string, to: string): ICSEvent[] {
     let emitted = 0;
     const add = (wall: number) => {
       const time = instant(start,wall);
+      const endTime = end ? instant(end,end.wall+wall-start.wall) : instant(start,wall+duration);
       if(time>until || emitted>=count) return false;
       emitted++;
-      if(!exclusions.has(time) && time < upper && (duration ? instant(start,wall+duration)>lower : time>=lower)) result.push({uid:unescape(field('UID')?.value??String(start.wall)),title:unescape(field('SUMMARY')?.value??''),start:format(start,wall),end:end || start.allDay ? format(start,wall+duration) : null,allDay:start.allDay,location:unescape(field('LOCATION')?.value??'')});
+      if(!exclusions.has(time) && time < upper && (duration ? endTime>lower : time>=lower)) result.push({uid:unescape(field('UID')?.value??String(start.wall)),title:unescape(field('SUMMARY')?.value??''),start:format(start,wall),end:end || start.allDay ? new Date(endTime).toISOString().slice(0,(end??start).allDay ? 10 : undefined) : null,allDay:start.allDay,location:unescape(field('LOCATION')?.value??'')});
       return true;
     };
     if(!['DAILY','WEEKLY','MONTHLY','YEARLY'].includes(freq)) { add(start.wall); continue; }

@@ -26,15 +26,17 @@ export function Popover({
     open, onOpenChange: setOpen, placement, whileElementsMounted: autoUpdate,
     middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
   });
-  const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context), useRole(context)]);
-  const close = useCallback(() => setOpen(false), [setOpen]);
   const phone = useIsPhone();
+  // On phones the sheet's backdrop closes it on click. Closing on pointerdown (the default) would let the same tap
+  // land on whatever was under the backdrop, opening a card behind the sheet.
+  const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context, { outsidePress: !phone }), useRole(context)]);
+  const close = useCallback(() => setOpen(false), [setOpen]);
   return (
     <>
       {trigger({ ref: refs.setReference, ...getReferenceProps() }, open)}
       {open && (
         <FloatingPortal>
-          {phone && <div className="sheet-backdrop" />}
+          {phone && <div className="sheet-backdrop" onClick={close} aria-hidden />}
           <FloatingFocusManager context={context} modal={false} initialFocus={-1}>
             <div ref={refs.setFloating} style={phone ? undefined : floatingStyles} className={phone ? `${className} sheet` : className} {...getFloatingProps()}>
               {phone && <div className="sheet-grabber" aria-hidden />}
@@ -65,19 +67,57 @@ export function MenuItem({
 }
 
 // ---------- Modal ----------
+/**
+ * Lets the browser/phone Back gesture close an open layer instead of leaving the page. Opening pushes a marker
+ * history entry; Back pops it and closes the layer; closing any other way pops the marker. Layers that hand over
+ * to each other (palette -> settings) share one marker, and a layer that navigates should use `replace` so the
+ * marker becomes the destination.
+ */
+let openLayers = 0;
+export function useBackToClose(onBack: () => void, on = true) {
+  const cb = useRef(onBack);
+  cb.current = onBack;
+  useEffect(() => {
+    if (!on) return;
+    openLayers++;
+    // The marker takes the next router index, so a `replace` navigation from inside the layer lands at that index.
+    const st = window.history.state;
+    if (!st?.cairnLayer) window.history.pushState({ ...st, idx: typeof st?.idx === 'number' ? st.idx + 1 : st?.idx, cairnLayer: 1 }, '');
+    const onPop = () => { if (!window.history.state?.cairnLayer) cb.current(); };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      openLayers--;
+      // Deferred so a layer that opens right after this one closes (or a StrictMode remount) can adopt the marker.
+      setTimeout(() => { if (openLayers === 0 && window.history.state?.cairnLayer) window.history.back(); }, 0);
+    };
+  }, [on]);
+}
+
 export function Modal({ children, onClose, className = 'modal', label }: { children: ReactNode; onClose: () => void; className?: string; label: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const downOnBackdrop = useRef(false);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Runs once per open: callers often pass an inline onClose, and re-running would steal focus on every render.
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close.current(); } };
     document.addEventListener('keydown', onKey);
     const first = ref.current?.querySelector<HTMLElement>('[autofocus], input, textarea, button');
     first?.focus();
     return () => { document.removeEventListener('keydown', onKey); prev?.focus?.(); };
-  }, [onClose]);
+  }, []);
+  useBackToClose(() => close.current());
   return (
     <FloatingPortal>
-      <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div
+        className="overlay"
+        // Close on click, and only when the press also started on the backdrop: closing on press would let the tap
+        // fall through to the page underneath, and a text selection dragged out of the dialog shouldn't close it.
+        onPointerDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+        onClick={(e) => { if (e.target === e.currentTarget && downOnBackdrop.current) onClose(); downOnBackdrop.current = false; }}
+      >
         <div ref={ref} className={className} role="dialog" aria-modal="true" aria-label={label}>{children}</div>
       </div>
     </FloatingPortal>

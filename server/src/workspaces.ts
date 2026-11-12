@@ -90,7 +90,8 @@ export function registerWorkspaces(app:Hono<Env>,s:Store,seed:(wid:string,actor:
   });
   app.get('/api/workspaces/:wid/invites',c=>{
     const wid=c.req.param('wid');
-    membership(s,c.get('actor'),wid,false,true);
+    // Invitation tokens can grant write access to another account.
+    membership(s,c.get('actor'),wid,true,true);
     return c.json(s.all('invites').filter(i=>i.workspaceId===wid&&!i.acceptedAt&&i.expiresAt>now()).map(cleanInvite));
   });
   app.post('/api/workspaces/:wid/invites',async c=>{

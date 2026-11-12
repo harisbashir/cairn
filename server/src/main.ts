@@ -13,4 +13,10 @@ const app = createApp({ dataDir });
 const server=serve({ fetch: app.fetch, port }, info => console.log(`Cairn listening on port ${info.port}`));
 
 server.once('close',releaseLock);
-for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>server.close(()=>process.exit(0)));
+// Live-update streams never end on their own, so drop open connections instead of waiting for them; otherwise
+// `docker stop` runs out its grace period, SIGKILLs the server and leaves the lock file behind.
+for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>{
+  server.close(()=>process.exit(0));
+  (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+  setTimeout(()=>process.exit(0),3000).unref();
+});

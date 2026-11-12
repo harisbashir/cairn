@@ -3,19 +3,28 @@ import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Activity, Crumb } from '../../shared/types.ts';
 import { MOD, del, invalidateWorkspace, post, timeAgo, useActivity, useRecent, useTrash } from './api.ts';
-import { PageIcon, useShell } from './Shell.tsx';
+import { PageIcon, useShell, visitedPaths } from './Shell.tsx';
 import { useUi } from './ui.tsx';
 
 export function TopBar({ crumbs = [], here, children, back }: { crumbs?: Crumb[]; here: ReactNode; children?: ReactNode; back?: boolean }) {
   const s = useShell();
   const navigate = useNavigate();
   const parent = crumbs[crumbs.length - 1];
+  // Back pops history when the previous entry is where we'd go anyway (keeps the stack and scroll position sane);
+  // otherwise it goes up to the parent page, or Home. It never leaves the app: history.length also counts other sites.
+  const goBack = () => {
+    const idx: number = window.history.state?.idx ?? 0;
+    const prev = idx > 0 ? visitedPaths.get(idx - 1) : undefined;
+    const target = parent ? `/w/${s.wid}/p/${parent.id}` : undefined;
+    if (prev && (!target || prev === target)) navigate(-1);
+    else navigate(target ?? `/w/${s.wid}`);
+  };
   return (
     <header className="topbar">
       {s.collapsed && <button className="icon-btn" aria-label="Show sidebar" title={`Show sidebar (${MOD}\\)`} onClick={s.toggleSidebar}><PanelLeft size={17} /></button>}
       {s.phone && back && (
         <button className="back-btn" aria-label={parent ? `Back to ${parent.title || 'Untitled'}` : 'Back'}
-          onClick={() => (parent ? navigate(`/w/${s.wid}/p/${parent.id}`) : window.history.length > 1 ? navigate(-1) : navigate(`/w/${s.wid}`))}>
+          onClick={goBack}>
           <ChevronLeft size={22} /><span>{parent ? parent.title || 'Untitled' : 'Back'}</span>
         </button>
       )}

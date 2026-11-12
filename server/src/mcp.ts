@@ -17,6 +17,7 @@ import { applyView } from '../../shared/query.ts';
 import type { Filter, Page, Property, Props, PropValue, Sort } from '../../shared/types.ts';
 
 const text = z.string();
+const title = z.string().max(10000);
 const identifier = z.string().min(1);
 const limitSchema = z.number().int().min(1).max(200).optional();
 const valueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]);
@@ -121,8 +122,8 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
     return pages.list(actor, input.workspace_id).filter(p => p.parentId === (input.parent_id ?? null)).sort((a, b) => a.position - b.position).map(p => ({ id: p.id, title: p.title, icon: p.icon, kind: p.kind, parentId: p.parentId }));
   });
   tool('get_page', 'Read a page, its path, named properties and Markdown body.', { page_id: identifier, include_children: z.boolean().optional() }, false, input => { const page=pages.get(actor,input.page_id);return {...describePage(pages,actor,page),...(input.include_children?{children:pages.list(actor,page.workspaceId).filter(p=>p.parentId===page.id).sort((a,b)=>a.position-b.position).map(p=>({id:p.id,title:p.title,icon:p.icon,kind:p.kind}))}:{})}; });
-  tool('create_page', 'Create a page with optional Markdown content.', { workspace_id: identifier, title: text, parent_id: identifier.optional(), markdown: text.optional(), icon: text.optional() }, true, input => describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, parentId: input.parent_id, icon: input.icon, content: input.markdown === undefined ? null : markdownToDoc(input.markdown) })));
-  tool('update_page', 'Update a title or icon and optionally replace the Markdown body.', { page_id: identifier, title: text.optional(), icon: text.optional(), markdown: text.optional() }, true, input => describePage(pages, actor, pages.patch(actor, input.page_id, { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.icon !== undefined ? { icon: input.icon } : {}), ...(input.markdown !== undefined ? { content: markdownToDoc(input.markdown) } : {}) })));
+  tool('create_page', 'Create a page with optional Markdown content.', { workspace_id: identifier, title, parent_id: identifier.optional(), markdown: text.optional(), icon: text.optional() }, true, input => describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, parentId: input.parent_id, icon: input.icon, content: input.markdown === undefined ? null : markdownToDoc(input.markdown) })));
+  tool('update_page', 'Update a title or icon and optionally replace the Markdown body.', { page_id: identifier, title: title.optional(), icon: text.optional(), markdown: text.optional() }, true, input => describePage(pages, actor, pages.patch(actor, input.page_id, { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.icon !== undefined ? { icon: input.icon } : {}), ...(input.markdown !== undefined ? { content: markdownToDoc(input.markdown) } : {}) })));
   tool('append_to_page', 'Append Markdown blocks to a page body.', { page_id: identifier, markdown: text }, true, input => {
     const page = pages.get(actor, input.page_id, true);
     return describePage(pages, actor, pages.patch(actor, page.id, { content: { type: 'doc', content: [...(page.content?.content ?? []), ...(markdownToDoc(input.markdown).content ?? [])] } }));
@@ -132,12 +133,12 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
   tool('get_database', 'Read a database schema and its saved views.', { database_id: identifier }, false, input => {
     const database = databasePage(pages, actor, input.database_id); return { id: database.id, title: database.title, schema: database.schema, views: database.views };
   });
-  tool('create_database', 'Create a database with named, typed properties.', { workspace_id: identifier, title: text, properties: z.array(propertySchema), parent_id: identifier.optional() }, true, input => {
+  tool('create_database', 'Create a database with named, typed properties.', { workspace_id: identifier, title, properties: z.array(propertySchema), parent_id: identifier.optional() }, true, input => {
     if (new Set(input.properties.map(p => p.name)).size !== input.properties.length) fail(400, 'Property names must be unique.');
     return describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, kind: 'database', parentId: input.parent_id, schema: input.properties.map(newProperty) }));
   });
   tool('update_database', 'Change a database title, add properties, rename properties or add options.', {
-    database_id: identifier, title: text.optional(), add_properties: z.array(propertySchema).optional(),
+    database_id: identifier, title: title.optional(), add_properties: z.array(propertySchema).optional(),
     rename_properties: z.union([z.record(z.string(), z.string()), z.array(z.object({ name: text, new_name: text }))]).optional(),
     add_options: z.record(z.string(), z.array(optionSchema)).optional()
   }, true, input => {
@@ -176,12 +177,12 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
     const rows=applyView(pages.rows(actor, database.id), { filters, sorts }, database.schema);
     return {total:rows.length,rows:rows.slice(input.offset??0,(input.offset??0)+(input.limit??100)).map(row => ({...row,properties:namedProps(database,row.props),props:undefined}))};
   });
-  tool('create_row', 'Create a database row using property names; new option names are added automatically.', { database_id: identifier, title: text, properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
+  tool('create_row', 'Create a database row using property names; new option names are added automatically.', { database_id: identifier, title, properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
     const database = databasePage(pages, actor, input.database_id, true);
     const props = convertProperties(pages, actor, database, input.properties ?? {});
     return describePage(pages, actor, pages.create(actor, database.workspaceId, { kind: 'row', parentId: database.id, title: input.title, props, content: input.markdown === undefined ? null : markdownToDoc(input.markdown) }));
   });
-  tool('update_row', 'Update a row title, named properties or Markdown body.', { row_id: identifier, title: text.optional(), properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
+  tool('update_row', 'Update a row title, named properties or Markdown body.', { row_id: identifier, title: title.optional(), properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
     const row = pages.get(actor, input.row_id, true);
     if (row.kind !== 'row' || !row.parentId) fail(400, 'The requested page is not a database row.');
     const database = databasePage(pages, actor, row.parentId!, true);

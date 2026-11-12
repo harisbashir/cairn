@@ -57,6 +57,20 @@ describe('v0.2 REST contract and OAuth',()=>{
     const approved:any=await (await request('/api/oauth/requests/'+req+'/approve','POST',{access:scope,workspaceId:wid})).json();
     return{client,verifier,code:new URL(approved.redirect).searchParams.get('code')!};
   }
+  it('withholds invitation credentials from read-only API and OAuth tokens', async () => {
+    const invite = await request(`/api/workspaces/${wid}/invites`, 'POST', { role: 'owner' });
+    expect(invite.status).toBe(200);
+    const reader: any = await (await request('/api/tokens', 'POST', { name: 'Reader', access: 'read', workspaceId: wid })).json();
+    const { client, verifier, code } = await authorization('read');
+    const oauth: any = await (await request('/oauth/token', 'POST', { grant_type: 'authorization_code', client_id: client.client_id, redirect_uri: client.redirect_uris[0], code, code_verifier: verifier }, '')).json();
+    for (const token of [reader.secret, oauth.access_token]) {
+      for (const prefix of ['/api', '/api/v1']) {
+        expect((await request(`${prefix}/workspaces/${wid}/invites`, 'GET', undefined, token)).status).toBe(403);
+      }
+    }
+    expect((await (await request(`/api/workspaces/${wid}/invites`)).json() as any)[0].token).toEqual(expect.any(String));
+  });
+
   it('exchanges PKCE codes once, rotates refresh tokens, scopes REST and MCP, and revokes grants',async()=>{
     const{client,verifier,code}=await authorization('read');
     const payload={grant_type:'authorization_code',client_id:client.client_id,redirect_uri:client.redirect_uris[0],code,code_verifier:verifier};

@@ -166,6 +166,24 @@ if (args[0] === 'lsf') fs.writeSync(1, ['cairn-backup-20000101-000000.zip', 'unr
       expect(readdirSync(dir).some(name => name.startsWith('.rclone-'))).toBe(false);
     } finally { process.env.PATH = oldPath; }
   });
+  it.each([1, 0xffffffff])('rejects excessive or inconsistent ZIP expansion (%i) before restoring a backup', async declaredSize => {
+    const { dir, s } = setup();
+    s.put('users', { id: 'preserve', name: 'Preserve' });
+    const bytes = zipSync({ 'cairn.db': strToU8('not a database'), 'manifest.json': strToU8('{}') });
+    // Reject both a huge advertised size and output exceeding a smaller declaration.
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(22, declaredSize, true);
+    const file = join(dir, 'bomb.zip'); writeFileSync(file, bytes);
+    await expect(restoreBackup(file, dir)).rejects.toThrow(/expanded archive/i);
+    expect(s.get('users', 'preserve')?.name).toBe('Preserve');
+    expect(readdirSync(dir).some(name => name.startsWith('.restore-'))).toBe(false);
+  });
+  it('rejects directory entries carrying data instead of bypassing expansion accounting', async () => {
+    const { dir } = setup();
+    const file = join(dir, 'directory-data.zip');
+    writeFileSync(file, zipSync({ 'files/folder/': strToU8('payload'), 'cairn.db': strToU8('db'), 'manifest.json': strToU8('{}') }));
+    await expect(restoreBackup(file, dir)).rejects.toThrow(/directory entries must be empty/i);
+    expect(readdirSync(dir).some(name => name.startsWith('.restore-'))).toBe(false);
+  });
   it('rejects malformed archives and traversal paths without changing current data', async () => {
     const { dir, s } = setup(); s.put('users', { id: 'safe' }); s.close();
     const file = join(dir, 'bad.zip'); writeFileSync(file, zipSync({ '../escape': strToU8('bad'), 'cairn.db': strToU8('not sqlite'), 'manifest.json': strToU8('{}') }));

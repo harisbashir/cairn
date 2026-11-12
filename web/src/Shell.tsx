@@ -3,7 +3,7 @@ import {
   Search, Settings as SettingsIcon, Star, StarOff, Table2, Trash2, UserPlus, Users, Check, Sparkles,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { Link, Navigate, NavLink, Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import type { Bootstrap, LiveEvent, Page, PageKind, SearchHit, Tree, TreeNode, User, Visibility, WorkspaceSummary } from '../../shared/types.ts';
 import { clientId, MOD, del, invalidateWorkspace, patch, post, put, qc, searchPages, useTree } from './api.ts';
 import { SettingsModal, type SettingsSection } from './Settings.tsx';
@@ -38,7 +38,16 @@ export function PageIcon({ icon, kind, size = 15 }: { icon: string; kind: PageKi
   );
 }
 
+/** Paths seen at each history index in this tab, so a Back button can tell whether popping history lands somewhere sensible. */
+export const visitedPaths = new Map<number, string>();
+function useTrackHistory() {
+  const { pathname } = useLocation();
+  const idx: number = window.history.state?.idx ?? 0;
+  useEffect(() => { visitedPaths.set(idx, pathname); }, [idx, pathname]);
+}
+
 export function Shell({ boot }: { boot: Bootstrap }) {
+  useTrackHistory();
   const { wid = '', pid } = useParams();
   const navigate = useNavigate();
   const ui = useUi();
@@ -173,7 +182,7 @@ function NewWorkspace({ onClose }: { onClose: () => void }) {
             const ws = await post<WorkspaceSummary>('/api/workspaces', { name: name.trim(), color });
             await qc.invalidateQueries({ queryKey: ['bootstrap'] });
             onClose();
-            navigate(`/w/${ws.id}`);
+            navigate(`/w/${ws.id}`, { replace: true }); // replaces the dialog's Back marker
           } catch (err) { setError((err as Error).message); }
         }}
       >
@@ -490,7 +499,8 @@ function Palette({ onClose }: { onClose: () => void }) {
     return () => { live = false; clearTimeout(t); };
   }, [q, s.wid]);
 
-  const go = (path: string) => { navigate(path); onClose(); };
+  // replace: the palette's Back marker entry becomes the destination, so Back returns to where search was opened.
+  const go = (path: string) => { navigate(path, { replace: true }); onClose(); };
   const actions: Cmd[] = [
     ...(s.canEdit ? [
       { id: 'new', title: 'New Page', icon: <FilePlus2 size={17} />, run: () => { s.createPage({}); onClose(); } },
@@ -522,7 +532,7 @@ function Palette({ onClose }: { onClose: () => void }) {
       <div className="palette-input">
         <Search size={18} />
         <input
-          autoFocus value={q} placeholder="Search pages, or type a command…" aria-label="Search"
+          autoFocus value={q} placeholder={s.phone ? 'Search' : 'Search pages, or type a command…'} aria-label="Search"
           onChange={(e) => { setQ(e.target.value); setActive(0); }}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, items.length - 1)); }
@@ -530,6 +540,7 @@ function Palette({ onClose }: { onClose: () => void }) {
             if (e.key === 'Enter') { e.preventDefault(); items[active]?.run(); }
           }}
         />
+        {s.phone && <button className="btn ghost palette-cancel" onClick={onClose}>Cancel</button>}
       </div>
       <div className="palette-list" ref={listRef}>
         {items.map((it, i) => (

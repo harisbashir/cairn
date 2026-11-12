@@ -1,4 +1,4 @@
-import { createReadStream, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { createReadStream, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,17 +20,36 @@ export async function restoreBackup(file: string, dataDir: string, force = false
     const entries = new Set<string>();
     let extractionError: Error | undefined;
     let manifestSize = 0;
+    // Native backups are stored without compression. Permit compressed backups
+    // while bounding expansion relative to input size, including unknown sizes.
+    const maxExpanded = Math.max(400 * 1024 * 1024, statSync(file).size * 100);
+    let declared = 0, expanded = 0;
     const unzip = new Unzip(entry => {
       const name = entry.name;
       if (!name || name.startsWith('/') || name.includes('\\') || name.split('/').some(part => part === '..' || part === '.') || entries.has(name)) throw new Error('Unsafe or duplicate path in backup archive.');
       if (!['cairn.db', 'manifest.json'].includes(name) && !name.startsWith('files/')) throw new Error('Unexpected file in backup archive.');
+      declared += entry.originalSize ?? 0;
+      if (declared > maxExpanded) throw new Error('Expanded archive is too large.');
       entries.add(name);
       const destination = join(stage, name);
-      if (name.endsWith('/')) { mkdirSync(destination, { recursive: true }); entry.ondata = error => { if (error) extractionError = error; }; entry.start(); return; }
+      if (name.endsWith('/')) {
+        mkdirSync(destination, { recursive: true });
+        entry.ondata = (error, chunk) => {
+          if (error) extractionError = error;
+          else if (chunk.length) { extractionError = new Error('Directory entries must be empty.'); entry.terminate(); }
+        };
+        entry.start(); return;
+      }
       mkdirSync(join(destination, '..'), { recursive: true });
       const fd = openSync(destination, 'wx', 0o600); descriptors.add(fd);
+      let entrySize = 0;
       entry.ondata = (error, chunk, final) => {
         if (error) { extractionError = error; return; }
+        if (extractionError) return;
+        expanded += chunk.length; entrySize += chunk.length;
+        if (expanded > maxExpanded || (entry.originalSize !== undefined && entrySize > entry.originalSize)) {
+          extractionError = new Error('Expanded archive is too large or has inconsistent entry sizes.'); entry.terminate(); return;
+        }
         if (name === 'manifest.json') manifestSize += chunk.length;
         if (manifestSize > 1024 * 1024) { extractionError = new Error('Backup manifest is too large.'); return; }
         writeSync(fd, chunk);

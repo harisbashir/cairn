@@ -336,6 +336,7 @@ kbd {
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--r-s); color: var(--text-2);
   text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; flex: 0 1 auto;
 }
+.crumbs .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .crumbs a:hover { background: var(--hover); color: var(--text); }
 .crumbs span.here { color: var(--text); font-weight: 600; }
 .crumbs .sep { color: var(--border-strong); flex: none; }
@@ -577,6 +578,7 @@ button.cell:hover { background: var(--hover); }
   max-height: 78vh; border-radius: 18px 18px 0 0; padding: 6px 10px calc(14px + env(safe-area-inset-bottom)); animation: sheet-up 0.2s ease-out;
 }
 .sheet > div { width: auto !important; }
+.sheet > .sheet-grabber { width: 38px !important; flex: none; }
 @keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
 .sheet-grabber { width: 38px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 4px auto 8px; }
 .sheet .menu-item { min-height: 46px; font-size: 16px; padding: 6px 10px; }
@@ -658,7 +660,12 @@ button.cell:hover { background: var(--hover); }
   .card .ico { font-size: 20px; height: 22px; }
   .card .t { font-size: 15px; }
   .prop-line { grid-template-columns: 112px minmax(0, 1fr); min-height: 44px; }
-  .db-bar { margin-top: 2px; }
+  .db-bar { margin-top: 2px; flex-wrap: nowrap; }
+  /* One line on a phone: the view tabs scroll sideways and New drops its label instead of wrapping onto a second row. */
+  .db-bar .view-tabs { flex: 0 1 auto; }
+  .db-bar .spacer { flex: 1 0 0; min-width: 0; }
+  .db-bar .db-new { width: 36px; padding: 0; justify-content: center; flex: none; }
+  .db-bar .db-new span { display: none; }
   .db-bar .btn.ghost.small { padding: 0 9px; }
   .tree-row { min-height: 46px; font-size: 16px; }
   .tree-row a { height: 46px; gap: 10px; }
@@ -674,6 +681,10 @@ button.cell:hover { background: var(--hover); }
   .palette-list { flex: 1; max-height: none; }
   .palette-item { min-height: 52px; }
   .palette-foot { display: none; }
+  .palette-cancel { color: var(--accent); font-size: 16px; padding: 0 4px; margin-right: -4px; }
+  /* No arrow keys on a phone: a highlighted first row reads as "selected" and invites the wrong tap. */
+  .palette-item.active { background: transparent; }
+  .palette-item:active { background: var(--selected); }
   .settings { width: 100%; height: 100%; border-radius: 0; }
   .toasts { bottom: calc(70px + env(safe-area-inset-bottom)); width: calc(100% - 24px); }
   .toast { border-radius: 14px; }

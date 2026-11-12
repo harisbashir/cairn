@@ -1,4 +1,4 @@
-import { Copy, Globe, History, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2 } from 'lucide-react';
+import { Copy, Globe, History, Share as ShareIcon, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { DocNode, Page, Props } from '../../shared/types.ts';
@@ -7,7 +7,7 @@ import { DatabaseView, PropIcon, PropValueEditor } from './Database.tsx';
 import { Editor } from './Editor.tsx';
 import { AiTag, TopBar } from './Home.tsx';
 import { PageIcon, useShell } from './Shell.tsx';
-import { CopyButton, EmojiPicker, MenuItem, Modal, Popover, Switch, useUi } from './ui.tsx';
+import { CopyButton, EmojiPicker, MenuItem, Modal, Popover, Switch, useIsPhone, useUi } from './ui.tsx';
 
 export function PageRoute() {
   const { pid } = useParams();
@@ -125,7 +125,7 @@ function PageView({ page }: { page: Page }) {
 
   return (
     <>
-      <TopBar back crumbs={page.breadcrumbs} here={<><PageIcon icon={icon} kind={page.kind} />{title || 'Untitled'}</>}>
+      <TopBar back crumbs={page.breadcrumbs} here={<><PageIcon icon={icon} kind={page.kind} /><span className="ell">{title || 'Untitled'}</span></>}>
         <span className="saved" aria-live="polite">
           {status === 'saving' ? 'Saving…' : status === 'error' ? 'Not saved' : (
             <>{page.updatedByType === 'ai' && <AiTag />} Edited {timeAgo(page.updatedAt)}</>
@@ -205,6 +205,7 @@ function PageView({ page }: { page: Page }) {
 
 function SharePopover({ page }: { page: Page }) {
   const ui = useUi();
+  const phone = useIsPhone();
   const url = page.shareToken ? `${location.origin}/s/${page.shareToken}` : '';
   const toggle = async (on: boolean) => {
     try {
@@ -213,7 +214,9 @@ function SharePopover({ page }: { page: Page }) {
     } catch (err) { ui.toast((err as Error).message); }
   };
   return (
-    <Popover placement="bottom-end" trigger={(p) => <button className="btn ghost small" {...p}>{page.shareToken && <Globe size={14} color="var(--accent)" />}Share</button>}>
+    <Popover placement="bottom-end" trigger={(p) => phone
+      ? <button className="icon-btn" aria-label={page.shareToken ? 'Share (public link on)' : 'Share'} {...p}>{page.shareToken ? <Globe size={19} color="var(--accent)" /> : <ShareIcon size={19} />}</button>
+      : <button className="btn ghost small" {...p}>{page.shareToken && <Globe size={14} color="var(--accent)" />}Share</button>}>
       <div className="menu-pad" style={{ width: 320 }}>
         <div className="row">
           <Globe size={18} color="var(--text-2)" />

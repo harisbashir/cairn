@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, writeSync, readFileSync, readdirSync, rmSync, statSync, copyFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, basename, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
@@ -21,12 +22,16 @@ function defaultSettings(): BackupSettings { return { enabled: false, frequency:
 const destinationSchema = z.object({ id: z.string().min(1).max(100), type: z.enum(['local', 'webdav', 'rclone']), name: z.string().min(1).max(200), config: z.record(z.string(), z.string().max(1024 * 1024)), hasSecret: z.boolean().optional().default(false) });
 const settingsSchema = z.object({ enabled: z.boolean(), frequency: z.enum(['hourly', 'daily', 'weekly']), hour: z.number().int().min(0).max(23), weekday: z.number().int().min(0).max(6), keep: z.number().int().min(1).max(1000), destinations: z.array(destinationSchema).max(20), rcloneAvailable: z.boolean().optional() });
 
+const LOCK_TOKEN = randomUUID();
 /** Store an advisory process lock only for the running HTTP server, not short-lived CLI commands. */
 export function serverIsRunning(dataDir: string): boolean {
   const lock = join(dataDir, 'cairn.server.lock');
   if (!existsSync(lock)) return false;
-  const pid = Number(readFileSync(lock, 'utf8').trim());
+  const [pidText, token] = readFileSync(lock, 'utf8').trim().split(' ');
+  const pid = Number(pidText);
   if (!Number.isInteger(pid) || pid <= 0) return true;
+  // Our PID with another run's token: a previous run with the same PID left the lock (container restarts are PID 1 both times).
+  if (pid === process.pid) return token === LOCK_TOKEN;
   try { process.kill(pid, 0); return true; } catch (error: any) { return error.code !== 'ESRCH'; }
 }
 export function acquireServerLock(dataDir: string): () => void {
@@ -38,8 +43,9 @@ export function acquireServerLock(dataDir: string): () => void {
     if (serverIsRunning(dataDir)) throw new Error('A Cairn server already holds this database.');
     rmSync(lock, { force: true }); fd = openSync(lock, 'wx', 0o600);
   }
-  try { writeFileSync(fd, String(process.pid)); } finally { closeSync(fd); }
-  return () => { if (existsSync(lock) && readFileSync(lock, 'utf8').trim() === String(process.pid)) rmSync(lock, { force: true }); };
+  const mark = `${process.pid} ${LOCK_TOKEN}`;
+  try { writeFileSync(fd, mark); } finally { closeSync(fd); }
+  return () => { if (existsSync(lock) && readFileSync(lock, 'utf8').trim() === mark) rmSync(lock, { force: true }); };
 }
 
 /** ZIP entries are fed a chunk at a time; uploaded file bodies are never accumulated in memory. */
@@ -153,7 +159,10 @@ export class BackupService {
     this.store.put('backupRuns', run);
     const oldest = this.store.all('backupRuns').reverse().sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(50);
     for (const old of oldest) this.store.remove('backupRuns', old.id);
-    this.running = this.perform(run, settings).finally(() => { this.running = undefined; });
+    this.running = this.perform(run, settings).catch(() => {
+      // Completion persistence can itself fail; detached jobs must not reject.
+      run.status = 'failed'; run.finishedAt = now();
+    }).finally(() => { this.running = undefined; });
     return run;
   }
   async waitForIdle(): Promise<void> { await this.running; }
@@ -167,10 +176,11 @@ export class BackupService {
   schedule(): void { if (!this.timer) { this.timer = setInterval(() => { try { this.tick(); } catch { /* A future tick retries if the database was temporarily unavailable. */ } }, 60_000); this.timer.unref(); } }
   close(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
   private async perform(run: BackupRun, settings: BackupSettings): Promise<void> {
-    const temp = mkdtempSync(join(this.store.dataDir, '.backup-run-'));
+    let temp: string | undefined;
     let localName: string | undefined;
     let archiveName: string | undefined;
     try {
+      temp = mkdtempSync(join(this.store.dataDir, '.backup-run-'));
       let time = new Date(run.startedAt); let name = filename(time);
       const previousNames = new Set(this.store.all('backupRuns').map(previous => previous.fileName));
       while (previousNames.has(name) || existsSync(join(this.store.dataDir, 'backups', name))) { time = new Date(time.getTime() + 1000); name = filename(time); }
@@ -189,7 +199,9 @@ export class BackupService {
       run.status = run.results.every(result => result.ok) ? 'done' : 'failed';
     } catch { run.status = 'failed'; run.results.push({ destinationId: '', name: 'Backup', ok: false, message: 'Could not create the backup archive.' }); }
     finally {
-      rmSync(temp, { recursive: true, force: true }); run.finishedAt = now(); run.downloadable = !!localName;
+      try { if (temp) rmSync(temp, { recursive: true, force: true }); }
+      catch { run.status = 'failed'; run.results.push({ destinationId: '', name: 'Backup', ok: false, message: 'Could not remove the temporary backup files.' }); }
+      run.finishedAt = now(); run.downloadable = !!localName;
       this.store.put('backupRuns', { ...run, ...(archiveName ? { fileName: archiveName } : {}) });
     }
   }
