@@ -36,6 +36,7 @@
     "@tiptap/react": "^3.33.1",
     "@tiptap/starter-kit": "^3.33.1",
     "@tiptap/suggestion": "^3.33.1",
+    "fflate": "^0.8.3",
     "hono": "^4.13.18",
     "lucide-react": "^1.72.0",
     "marked": "^18.2.0",

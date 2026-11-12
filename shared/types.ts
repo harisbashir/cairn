@@ -15,6 +15,14 @@ export interface User {
   disabled: boolean;
   createdAt: string;
   lastSeenAt: string | null;
+  prefs: UserPrefs;
+}
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type Accent = 'blue' | 'violet' | 'green' | 'orange' | 'pink' | 'graphite';
+export interface UserPrefs {
+  theme: ThemeMode; // default 'system'
+  accent: Accent; // default 'blue'
 }
 
 export interface WorkspaceSummary {
@@ -127,7 +135,14 @@ export interface Sort {
   dir: 'asc' | 'desc';
 }
 
-export type ViewType = 'table' | 'board' | 'list';
+export type ViewType = 'table' | 'board' | 'list' | 'gallery' | 'calendar' | 'timeline' | 'chart' | 'feed';
+
+export interface ChartConfig {
+  kind: 'bar' | 'donut' | 'line';
+  groupBy: string; // property id (select, status, multi_select, checkbox, person, relation, date → by month) or 'createdAt'
+  measure: 'count' | 'sum' | 'avg';
+  valueProp?: string; // number property id, for sum / avg
+}
 
 export interface View {
   id: string;
@@ -138,6 +153,15 @@ export interface View {
   groupBy?: string; // board: a select/status property id
   hidden?: string[]; // hidden property ids
   widths?: Record<string, number>; // table column widths in px
+  cardProps?: string[]; // property ids shown on cards (board, gallery, list, calendar, feed, phone). Unset = sensible default.
+  columnOrder?: string[]; // board: option ids left to right ('' = the "no value" column)
+  hiddenColumns?: string[]; // board: option ids not shown
+  dateProp?: string; // calendar + timeline: start date property id
+  endDateProp?: string; // timeline: optional end date property id
+  zoom?: 'week' | 'month' | 'quarter'; // timeline
+  cover?: 'page' | 'none'; // gallery: show the row's cover image
+  chart?: ChartConfig;
+  phone?: 'auto' | 'same'; // 'auto' (default) renders a phone-friendly layout on small screens
 }
 
 // ---------- Pages ----------
@@ -197,6 +221,11 @@ export interface Row {
   props: Props;
   position: number;
   hasContent: boolean;
+  cover: string; // the row page's cover, else the first image in its body, else ''
+  preview: string; // first ~200 characters of the body as plain text
+  createdBy: string;
+  createdByName: string;
+  updatedByType: ActorType;
   createdAt: string;
   updatedAt: string;
 }
@@ -298,8 +327,150 @@ export interface AdminSettings {
 export type LiveEvent =
   | { type: 'page'; pageId: string; parentId: string | null; change: 'created' | 'updated' | 'deleted' | 'restored' | 'moved'; actorId: string; actorType: ActorType; clientId: string | null }
   | { type: 'members' }
+  | { type: 'home' }
+  | { type: 'stickies' }
   | { type: 'ping' };
 
 export interface ApiError {
   error: { code: string; message: string };
+}
+
+// ---------- Home dashboard ----------
+
+export type WidgetType =
+  | 'welcome' // greeting + quick actions
+  | 'recent' // recently edited pages
+  | 'favorites'
+  | 'activity' // latest activity feed
+  | 'stickies' // sticky-note wall
+  | 'view' // a database view embedded: config { databaseId, viewId? , limit? }
+  | 'page' // a page's content embedded read-only: config { pageId }
+  | 'note' // free text written on the dashboard: config { markdown }
+  | 'links' // quick links: config { links: { label, url }[] }
+  | 'calendar' // upcoming dated rows + external calendar events: config { days? }
+  | 'stats'; // workspace counts
+
+export interface Widget {
+  id: string;
+  type: WidgetType;
+  title?: string; // overrides the default heading
+  size: 'third' | 'half' | 'two-thirds' | 'full'; // width on a 6-column grid (2, 3, 4, 6)
+  config: Record<string, unknown>;
+}
+
+export interface HomeLayout {
+  widgets: Widget[];
+  personal: boolean; // true when the user has their own layout instead of the workspace default
+  canEditShared: boolean; // owners and admins may change the workspace default
+}
+
+export type StickyColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple' | 'orange' | 'gray';
+export interface Sticky {
+  id: string;
+  workspaceId: string;
+  text: string; // plain text, newlines allowed
+  color: StickyColor;
+  visibility: Visibility; // 'private' = only the author
+  position: number;
+  createdBy: string;
+  createdByName: string;
+  createdByType: ActorType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------- Calendars ----------
+
+export interface ExternalCalendar {
+  id: string;
+  name: string;
+  color: OptionColor;
+  url: string; // ICS / iCal subscription address (masked to its host for non-admins)
+  lastSyncedAt: string | null;
+  lastError: string | null;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string; // 'YYYY-MM-DD' for all-day, else ISO
+  end: string | null;
+  allDay: boolean;
+  source: 'row' | 'external';
+  color: OptionColor;
+  calendarName: string; // database title or external calendar name
+  pageId: string | null; // row page to open, for source 'row'
+  location: string;
+}
+
+export interface CalendarFeed {
+  url: string | null; // private ICS address others (Google, Apple, Outlook) can subscribe to
+}
+
+// ---------- Import / export / jobs ----------
+
+export interface Job {
+  id: string;
+  kind: 'notion-import' | 'notion-export' | 'import' | 'backup';
+  status: 'running' | 'done' | 'failed';
+  progress: string; // human-readable, e.g. "AI To-do: 40 of 71 rows"
+  error: string | null;
+  result: { pageIds?: string[]; url?: string } | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface NotionSource {
+  id: string;
+  kind: 'database' | 'page';
+  title: string;
+  icon: string;
+}
+
+// ---------- Backups (instance admin) ----------
+
+export type BackupDestinationType = 'local' | 'webdav' | 'rclone';
+export interface BackupDestination {
+  id: string;
+  type: BackupDestinationType;
+  name: string;
+  // local: {} (kept in the data volume under backups/)
+  // webdav (Nextcloud, ownCloud, any WebDAV): { url, username, password }
+  // rclone (Google Drive, Dropbox, OneDrive, S3, ...): { remote: 'gdrive:Cairn', config: '<rclone.conf text>' }
+  // Secrets (password, config) are write-only: reads return '' and hasSecret: true.
+  config: Record<string, string>;
+  hasSecret: boolean;
+}
+export interface BackupSettings {
+  enabled: boolean;
+  frequency: 'hourly' | 'daily' | 'weekly';
+  hour: number; // 0-23, server local time, for daily / weekly
+  weekday: number; // 0-6 (0 = Sunday), for weekly
+  keep: number; // how many backups to keep per destination
+  destinations: BackupDestination[];
+  rcloneAvailable: boolean; // whether the rclone binary is installed on the server
+}
+export interface BackupRun {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: 'running' | 'done' | 'failed';
+  sizeBytes: number;
+  trigger: 'schedule' | 'manual';
+  results: { destinationId: string; name: string; ok: boolean; message: string }[];
+  downloadable: boolean; // a local copy exists
+}
+
+// ---------- OAuth (MCP clients and mobile apps) ----------
+export interface OAuthGrantInfo {
+  clientName: string;
+  redirectHost: string;
+  scope: 'read' | 'write';
+}
+export interface ConnectedApp {
+  id: string;
+  clientName: string;
+  access: 'read' | 'write';
+  createdAt: string;
+  lastUsedAt: string | null;
 }
