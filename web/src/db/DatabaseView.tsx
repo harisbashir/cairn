@@ -4,7 +4,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { applyView } from '../../../shared/query.ts';
 import type { ChartConfig, Page, Property, Props, Row, SelectOption, View, ViewType } from '../../../shared/types.ts';
-import { patch, post, qc, uid, usePage, useRows, useWsUsers } from '../api.ts';
+import { patch, post, qc, uid, useBootstrap, usePage, useRows, useWsUsers } from '../api.ts';
 import { useShell } from '../Shell.tsx';
 import { MenuItem, Popover, useIsPhone, useUi } from '../ui.tsx';
 import { BoardView } from './BoardView.tsx';
@@ -70,7 +70,8 @@ function useDb(page: Page, canEdit: boolean, save: Save) {
   const [viewId, setViewId] = useState(() => localStorage.getItem(`cairn.view.${page.id}`) ?? '');
   const view = views.find((v) => v.id === viewId) ?? views[0];
   const rows = rowsQ.data ?? [];
-  const shown = useMemo(() => applyView(rows, view, schema), [rows, view, schema]);
+  const me = useBootstrap().data?.user?.id;
+  const shown = useMemo(() => applyView(rows, view, schema, { userId: me }), [rows, view, schema, me]);
   const relTitles = useRelTitles(schema);
 
   const setSchema = (next: Property[]) => {
@@ -274,7 +275,8 @@ function EmbeddedInner({ page, viewId, limit }: { page: Page; viewId?: string; l
   const save: Save = (p) => { patch(`/api/pages/${page.id}`, p).then(() => qc.invalidateQueries({ queryKey: ['page', page.id] })).catch(() => {}); };
   const { db } = useDb(page, !!page.canEdit && !page.deletedAt, save);
   const view = db.views.find((v) => v.id === viewId) ?? db.views[0];
-  const shown = useMemo(() => { const all = applyView(db.rows, view, db.schema); return limit ? all.slice(0, limit) : all; }, [db.rows, view, db.schema, limit]);
+  const me = useBootstrap().data?.user?.id;
+  const shown = useMemo(() => { const all = applyView(db.rows, view, db.schema, { userId: me }); return limit ? all.slice(0, limit) : all; }, [db.rows, view, db.schema, limit, me]);
   return <ViewBody db={{ ...db, view, shown, setView: () => {}, setSchema: () => {} }} />;
 }
 

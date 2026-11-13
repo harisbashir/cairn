@@ -162,6 +162,7 @@ function inputSchema(path:string,method:string):Schema {
   if(path.endsWith('/admin/mail'))return object({enabled:bool,host:str,port:{type:'integer',minimum:1,maximum:65535},secure:bool,username:str,password:{type:'string',writeOnly:true},from:str,hasPassword:bool},['enabled','host','port','secure','username','from']);
   if(path.endsWith('/mail/test'))return object({to:{type:'string',format:'email'}},[]);
   if(path.endsWith('/save-as-template'))return object({title:str},[]);
+  if(path.endsWith('/apply-template'))return object({templateId:str},['templateId']);
   if(path.endsWith('/comments'))return object({body:{type:'string',minLength:1,maxLength:5000},quote:str,threadId:str},['body']);
   if(path.includes('/comments/'))return object({body:{type:'string',minLength:1,maxLength:5000},resolved:bool},[]);
   if(path.endsWith('/changes/undo'))return object({ids:array(str),force:bool},['ids']);
@@ -230,5 +231,5 @@ export function openapi(app:Hono<Env>) {
   external('get','/files/{id}/{name}',{type:'string',format:'binary'},undefined,true,'200','application/octet-stream');
   paths['/files/{id}/{name}'].get.parameters=['id','name'].map(name=>({name,in:'path',required:true,schema:str})).concat([{name:'w',in:'query',required:false,schema:num},{name:'share',in:'query',required:false,schema:str}]);
   external('post','/mcp',record(),object({jsonrpc:choice('2.0'),id:{anyOf:[str,num]},method:str,params:record()},['jsonrpc','method']),true);
-  return {openapi:'3.1.0',info:{title:'Cairn API',version:'0.3.0'},servers:[{url:'/api/v1'}],paths,components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Session, API token, or OAuth access token.'},cookieAuth:{type:'apiKey',in:'cookie',name:'cairn_session'}},schemas}};
+  return {openapi:'3.1.0',info:{title:'Cairn API',version:'0.3.1'},servers:[{url:'/api/v1'}],paths,components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Session, API token, or OAuth access token.'},cookieAuth:{type:'apiKey',in:'cookie',name:'cairn_session'}},schemas}};
 }

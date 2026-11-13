@@ -61,11 +61,11 @@ export function inferFormulaType(
   if (n === 'prop') {
     const a = ast.args[0];
     const p = a?.kind === 'literal' ? schema.find((p) => p.name === a.value || p.id === a.value) : undefined;
-    if (p?.formula?.resultType) return p.formula.resultType;
     if (p?.type === 'formula' && p.formula && !seen.has(p.id)) {
       const parsed = parseFormula(p.formula.expression);
       if (parsed.ok) return inferFormulaType(parsed.ast, schema, new Set([...seen, p.id]));
     }
+    if (p?.formula?.resultType) return p.formula.resultType;
     return p?.type === 'date' || (p?.type === 'rollup' && ['earliest', 'latest'].includes(p.rollup?.fn ?? ''))
       ? 'date'
       : p?.type === 'checkbox'

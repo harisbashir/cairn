@@ -222,6 +222,19 @@ it('merges only within the edit window and client, and force undo restores exact
   expect(pages.changes(actor, 'w')[0].clientName).toBe('Agent A');
   expect(pages.activity(actor, 'w')[0].clientName).toBe('Agent A');
 });
+it('batch-undoes consecutive changes to one page without false conflicts', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-12T12:00:00Z'));
+  const p = pages.create(actor, 'w', { title: 'Start' });
+  pages.patch({ ...actor, clientId: 'one' }, p.id, { title: 'One' });
+  vi.advanceTimersByTime(1000);
+  pages.patch({ ...actor, clientId: 'two' }, p.id, { title: 'Two' });
+  const updates = pages.changes(actor, 'w', { actor: 'all' }).filter((c) => c.action === 'updated');
+  expect(updates).toHaveLength(2);
+  const batch = new Map<string, string>();
+  for (const c of updates) undoChange(pages, actor, c.id, false, batch);
+  expect(pages.get(actor, p.id).title).toBe('Start');
+});
 it('undoes create, delete, restore, move, content, properties and schema independently', () => {
   const p = pages.create(actor, 'w', { title: 'Page' }),
     parent = pages.create(actor, 'w', { title: 'Parent' });

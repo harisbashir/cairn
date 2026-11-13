@@ -7,6 +7,8 @@ import { applyView } from '../../../shared/query.ts';
 import type { Filter, Page, Property, Props, Row, SelectOption, View } from '../../../shared/types.ts';
 import { patch, post, qc, uid, useBootstrap, usePage, useRows, useWsUsers } from '../api.ts';
 import { VIEWS } from '../db/DatabaseView.tsx';
+import { PropConfigHost } from '../db3/PropConfig.tsx';
+import { isComputed } from '../db3/format.ts';
 import { COLORS, useRelTitles, type Db } from '../db/kit.tsx';
 import { PhoneView } from '../db/PhoneView.tsx';
 import { TableView } from '../db/TableView.tsx';
@@ -103,6 +105,8 @@ function Linked({ a, editable, set, remove }: { a: LinkedAttrs; editable: boolea
   return <LinkedInner db={page.data} a={a} editable={editable} set={set} remove={remove} />;
 }
 
+const propHosts = new Map<string, object>();
+
 function LinkedInner({ db: dbPage, a, editable, set, remove }: { db: Page; a: LinkedAttrs; editable: boolean; set: (a: Partial<LinkedAttrs>) => void; remove: () => void }) {
   const s = useShell();
   const ui = useUi();
@@ -138,7 +142,7 @@ function LinkedInner({ db: dbPage, a, editable, set, remove }: { db: Page; a: Li
     setSchema: saveSchema, setView: () => {},
     patchRow: (id, body) => {
       qc.setQueryData<Row[]>(['rows', dbPage.id], (old) => old?.map((r) => (r.id === id ? { ...r, ...(body.title !== undefined ? { title: body.title } : {}), props: { ...r.props, ...body.props } } : r)));
-      patch(`/api/pages/${id}`, body).then(() => qc.invalidateQueries({ queryKey: ['page', id] })).catch((err) => { ui.toast((err as Error).message); rowsQ.refetch(); });
+      patch(`/api/pages/${id}`, body).then(() => { qc.invalidateQueries({ queryKey: ['page', id] }); qc.invalidateQueries({ queryKey: ['rows'] }); }).catch((err) => { ui.toast((err as Error).message); rowsQ.refetch(); });
     },
     addRow: async (props = {}) => {
       // New rows start out matching the view's simple filters (and link to this page), so they don't vanish.
@@ -146,7 +150,7 @@ function LinkedInner({ db: dbPage, a, editable, set, remove }: { db: Page; a: Li
       for (const f of filters) {
         if (f.propertyId === 'title' || f.value === undefined) continue;
         const prop = schema.find((p) => p.id === f.propertyId);
-        if (!prop) continue;
+        if (!prop || isComputed(prop)) continue;
         const v = resolve(f.value);
         if (v === null || v === undefined || v === '') continue;
         const multi = ['relation', 'person', 'multi_select'].includes(prop.type);
@@ -168,6 +172,13 @@ function LinkedInner({ db: dbPage, a, editable, set, remove }: { db: Page; a: Li
       return opt;
     },
   };
+  // One rollup/formula editor host per database on the page, even if it is linked twice.
+  const [hostOwner, setHostOwner] = useState(false);
+  useEffect(() => {
+    if (!canEdit || propHosts.has(dbPage.id)) return;
+    const token = {}; propHosts.set(dbPage.id, token); setHostOwner(true);
+    return () => { if (propHosts.get(dbPage.id) === token) propHosts.delete(dbPage.id); };
+  }, [canEdit, dbPage.id]);
   const newRow = async () => {
     const row = await db.addRow();
     if (row) setTimeout(() => (box.current?.querySelector(`[data-row="${row.id}"] input`) as HTMLInputElement | null)?.focus(), 60);
@@ -193,6 +204,7 @@ function LinkedInner({ db: dbPage, a, editable, set, remove }: { db: Page; a: Li
         )}
       </div>
       {menu && <Settings a={a} db={dbPage} views={views} set={set} remove={remove} close={() => setMenu(false)} />}
+      {hostOwner && <PropConfigHost db={db} />}
       <div className="lv-body">
         {rowsQ.isPending ? <div className="lv-loading" /> : all.length === 0 && type !== 'calendar' && type !== 'timeline' && type !== 'chart' ? (
           <div className="lv-empty">{narrowed ? 'No rows link to this page yet.' : 'No rows to show.'}{canEdit && <button className="btn ghost small" onClick={newRow}><Plus size={14} />New Row</button>}</div>

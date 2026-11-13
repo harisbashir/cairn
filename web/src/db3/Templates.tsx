@@ -202,7 +202,7 @@ function TemplatePicker({ req }: { req: NonNullable<PickReq> }) {
 }
 
 /** A quiet suggestion on a fresh, empty page: fill it from a page template. */
-export function StartFromTemplate({ page, onApply }: { page: Page; onApply: (p: { title: string; icon: string; cover: string; content: unknown }) => void }) {
+export function StartFromTemplate({ page, onApply }: { page: Page; onApply: (p: Page) => void }) {
   const s = useShell();
   const q = usePageTemplates(s.wid);
   const ui = useUi();
@@ -210,11 +210,7 @@ export function StartFromTemplate({ page, onApply }: { page: Page; onApply: (p: 
   if (!list.length) return null;
   const apply = async (t: TemplateSummary) => {
     try {
-      const src = await get<Page>(`/api/pages/${t.id}`);
-      const today = new Date().toLocaleDateString('en-CA');
-      const fill = (v: unknown): unknown => typeof v === 'string' ? v.replaceAll('{{date}}', today)
-        : Array.isArray(v) ? v.map(fill) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fill(x)])) : v;
-      onApply({ title: page.title || (fill(src.title) as string), icon: page.icon || src.icon, cover: page.cover || src.cover, content: fill(src.content) });
+      onApply(await post<Page>(`/api/pages/${page.id}/apply-template`, { templateId: t.id }));
     } catch (err) { ui.toast((err as Error).message); }
   };
   return (

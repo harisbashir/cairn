@@ -94,3 +94,10 @@ it('infers referenced computed dates and formula result types', () => {
   expect(first.ok && first.resultType).toBe('date');
   expect(second.ok && second.resultType).toBe('date');
 });
+it('ignores stale stored result types on referenced formulas', () => {
+  const schema: import('./types.ts').Property[] = [
+    { id: 'a', name: 'A', type: 'formula', formula: { expression: 'today()', resultType: 'text' } },
+  ];
+  const b = parseFormula('prop("A")', schema);
+  expect(b.ok && b.resultType).toBe('date');
+});

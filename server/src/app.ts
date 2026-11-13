@@ -36,7 +36,7 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch, notifi
   app.notFound(c => c.json({ error: { code: 'not_found', message: 'Resource not found.' } }, 404));
   app.use('*', hardening);
   app.use('/api/*', apiAuthentication(store));
-  app.get('/api/health',c=>c.json({ok:true,version:'0.3.0'}));
+  app.get('/api/health',c=>c.json({ok:true,version:'0.3.1'}));
   registerAccounts(app, store,
     (wid, actor, title) => { pages.create(actor, wid, { title }); },
     wid => pages.deleteWorkspace(wid), wid => events.emit(wid, { type: 'members' }),

@@ -1,6 +1,6 @@
 {
   "name": "cairn",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Cairn: a clear, AI-ready workspace for notes, docs and databases.",

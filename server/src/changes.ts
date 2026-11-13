@@ -237,9 +237,9 @@ function applyUndo(
     ? (pages.s.get<Page>('pages', c.pageId) ?? fail(409, 'An affected row no longer exists.'))
     : pages.get(actor, c.pageId, true, true);
   if (c.undoneAt) fail(409, 'This change was already undone.');
-  const expected = related ? (expectedRows.get(page.id) ?? page.updatedAt) : page.updatedAt;
+  const expected = expectedRows.get(page.id) ?? page.updatedAt;
   if (!force && expected !== c.pageUpdatedAt) fail(409, 'Page has changed since this edit.');
-  if (related) expectedRows.set(page.id, c.beforeUpdatedAt ?? '');
+  expectedRows.set(page.id, c.beforeUpdatedAt ?? '');
   for (const [key, value] of Object.entries(c.values)) {
     if (key.startsWith('props.')) {
       if (value.before === null) delete page.props[key.slice(6)];
@@ -268,8 +268,14 @@ function applyUndo(
   c.undoneByName = actor.user.name;
   pages.s.put('changes', c);
 }
-export function undoChange(pages: Pages, actor: Actor, key: string, force = false): ChangeSummary {
+/**
+ * `batch` carries revisions across a multi-undo: once this request has undone a newer change to a page, an older
+ * change to that page is checked against the revision that newer change started from, not the undo's own write.
+ */
+export function undoChange(pages: Pages, actor: Actor, key: string, force = false, batch?: Map<string, string>): ChangeSummary {
   const c = change(pages, actor, key);
-  pages.s.transaction(() => applyUndo(pages, actor, c, force));
+  const expected = new Map(batch);
+  pages.s.transaction(() => applyUndo(pages, actor, c, force, false, expected));
+  if (batch) for (const [k, v] of expected) batch.set(k, v);
   return summary(pages, actor, c);
 }

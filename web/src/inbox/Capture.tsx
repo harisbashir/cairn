@@ -102,7 +102,7 @@ export function CapturePage() {
     try {
       const r = await post<{ page: Page }>('/api/capture', {
         ...(title.trim() ? { title: title.trim() } : {}), ...(text.trim() ? { text: text.trim() } : {}), ...(url.trim() ? { url: url.trim() } : {}),
-        workspaceId: target.workspaceId, databaseId: target.databaseId,
+        workspaceId: target.workspaceId, ...(target.databaseId ? { databaseId: target.databaseId } : {}),
       });
       const saved = user.prefs.capture;
       if (saved?.workspaceId !== target.workspaceId || saved?.databaseId !== target.databaseId) {

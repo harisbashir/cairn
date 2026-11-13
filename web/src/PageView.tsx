@@ -207,11 +207,9 @@ function PageView({ page }: { page: Page }) {
           {page.kind === 'page' && <PageReminders page={page} canEdit={canEdit} open={remind} onClose={() => setRemind(false)} />}
           {page.kind === 'page' && canEdit && !page.isTemplate && isEmptyDoc(page.content) && (
             <StartFromTemplate page={page} onApply={async (t) => {
-              try {
-                await patch(`/api/pages/${page.id}`, t);
-                setTitle(t.title); setIcon(t.icon);
-                await qc.invalidateQueries({ queryKey: ['page', page.id] });
-              } catch (err) { ui.toast((err as Error).message); }
+              setTitle(t.title); setIcon(t.icon);
+              qc.invalidateQueries({ queryKey: ['tree', s.wid] });
+              await qc.invalidateQueries({ queryKey: ['page', page.id] });
             }} />
           )}
 

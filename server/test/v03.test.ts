@@ -96,6 +96,11 @@ describe('v0.3 pages, review and capture', () => {
     const tree = await json(`/api/workspaces/${wid}/tree`);
     expect(tree.nodes.some((p: any) => p.id === t.id)).toBe(false);
     expect(tree.nodes.some((p: any) => p.parentId === copy.id && p.title === 'Child')).toBe(true);
+    const blank = await create({ title: '' });
+    const applied = await json(`/api/pages/${blank.id}/apply-template`, 'POST', { templateId: t.id });
+    expect(applied.title).toBe('Template');
+    const after = await json(`/api/workspaces/${wid}/tree`);
+    expect(after.nodes.some((p: any) => p.parentId === blank.id && p.title === 'Child')).toBe(true);
   });
   it('validates computed schemas and rejects computed and invalid file writes', async () => {
     const db = await create({

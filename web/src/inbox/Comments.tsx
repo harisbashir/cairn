@@ -147,7 +147,7 @@ function CommentsBody({ page, quote, clearQuote, onClose }: { page: Page; quote:
             <Switch on={showResolved} onChange={setShowResolved} label="Show resolved threads" />
           </label>
         )}
-        {!s.phone && <button className="icon-btn" aria-label="Close comments" onClick={onClose}><X size={17} /></button>}
+        <button className="icon-btn" aria-label="Close comments" onClick={onClose}><X size={17} /></button>
       </div>
       <div className="inb-threads" ref={listRef}>
         {comments.isPending && <div className="inb-quiet">Loading…</div>}

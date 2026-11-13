@@ -111,7 +111,8 @@ export async function mentionItems(wid: string, query: string, localPages: TreeN
     data = { pages: localPages.filter((p) => (p.title || 'Untitled').toLowerCase().includes(q)).slice(0, 8).map((p) => ({ id: p.id, title: p.title, icon: p.icon, path: '' })), people: [] };
   }
   rememberPeople(data.people);
-  const pages: MenuItemDef[] = data.pages.slice(0, 6).map((p) => ({
+  const self = window.location.pathname.match(/\/p\/([^/?#]+)/)?.[1];
+  const pages: MenuItemDef[] = data.pages.filter((p) => p.id !== self).slice(0, 6).map((p) => ({
     id: `page:${p.id}`, section: 'Pages', title: p.title || 'Untitled', desc: p.path || undefined,
     icon: p.icon ? <span className="emoji mention-ico">{p.icon}</span> : <FileText size={16} />,
     run: (editor, range) => { editor.chain().focus().insertContentAt(range, [{ type: 'pageLink', attrs: { pageId: p.id, title: p.title || 'Untitled' } }, { type: 'text', text: ' ' }]).run(); },

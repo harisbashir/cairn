@@ -15,7 +15,7 @@ import type { Pages } from './pages.ts';
 
 const runFile = promisify(execFile);
 const backupName = /^cairn-backup-\d{8}-\d{6}\.zip$/;
-export const backupVersion = '0.3.0';
+export const backupVersion = '0.3.1';
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Backup failed.';
 export function rcloneAvailable(): boolean { const result = spawnSync('rclone', ['version'], { stdio: 'ignore', timeout: 5000 }); return !result.error && result.status === 0; }
 function defaultSettings(): BackupSettings { return { enabled: false, frequency: 'daily', hour: 3, weekday: 0, keep: 7, destinations: [], rcloneAvailable: rcloneAvailable() }; }

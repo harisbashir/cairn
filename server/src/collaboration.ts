@@ -5,6 +5,7 @@ import type { Backlink, Page, DocNode } from '../../shared/types.ts';
 import { docToPlainText } from '../../shared/markdown.ts';
 import type { Pages } from './pages.ts';
 import { clean } from './pages.ts';
+import { copyChildren } from './templates.ts';
 import { updateComment, deleteComment } from './comments.ts';
 import { changeDetail, undoChange } from './changes.ts';
 
@@ -117,6 +118,27 @@ export function registerCollaboration(app: Hono<Env>, pages: Pages): void {
     const input = await body(c, z.object({ title: z.string().max(10000).optional() }));
     return c.json(clean(pages.saveAsTemplate(c.get('actor'), c.req.param('id'), input.title)));
   });
+  app.post('/api/pages/:id/apply-template', async (c) => {
+    const a = c.get('actor'),
+      { templateId } = await body(c, z.object({ templateId: z.string() }));
+    const page = pages.get(a, c.req.param('id'), true),
+      template = pages.get(a, templateId);
+    if (page.kind !== 'page' || !template.isTemplate || template.kind !== 'page' || template.workspaceId !== page.workspaceId)
+      fail(400, 'Template does not match the destination.');
+    const today = pages.today(a);
+    const fill = (v: any): any =>
+      typeof v === 'string' ? v.replaceAll('{{date}}', today)
+        : Array.isArray(v) ? v.map(fill)
+          : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fill(x)])) : v;
+    const result = pages.patch(a, page.id, {
+      title: page.title || fill(template.title),
+      icon: page.icon || template.icon,
+      cover: page.cover || template.cover,
+      content: fill(template.content),
+    });
+    copyChildren(pages, a, template, result);
+    return c.json(clean(result));
+  });
   app.get('/api/pages/:id/backlinks', (c) => c.json(pages.backlinks(c.get('actor'), c.req.param('id'))));
   app.get('/api/workspaces/:wid/mentionables', (c) => {
     const a = c.get('actor'),
@@ -194,9 +216,10 @@ export function registerCollaboration(app: Hono<Env>, pages: Pages): void {
     const ids = [...new Set(input.ids)].sort((x, y) =>
       (pages.s.get('changes', y)?.at ?? '').localeCompare(pages.s.get('changes', x)?.at ?? ''),
     );
+    const batch = new Map<string, string>();
     for (const id of ids) {
       try {
-        undoChange(pages, a, id, input.force);
+        undoChange(pages, a, id, input.force, batch);
         result.undone.push(id);
       } catch (e) {
         if ((e as { status?: number }).status === 409) result.conflicts.push(id);
@@ -216,8 +239,8 @@ export function registerCollaboration(app: Hono<Env>, pages: Pages): void {
               title: z.string().max(10000).optional(),
               text: z.string().max(100000).optional(),
               url: z.string().max(10000).optional(),
-              workspaceId: z.string().optional(),
-              databaseId: z.string().optional(),
+              workspaceId: z.string().nullish().transform((v) => v ?? undefined),
+              databaseId: z.string().nullish().transform((v) => v ?? undefined),
             }),
           ),
         ),
