@@ -7,6 +7,7 @@ import type { Page, Property, PropValue, Sticky } from '../../shared/types.ts';
 import { docToMarkdown, markdownToDoc } from '../../shared/markdown.ts';
 import { type Actor, type Env, body, fail, membership } from './common.ts';
 import { clean, Pages } from './pages.ts';
+import { validateSchema } from './page-fields.ts';
 import { pageCreate } from './page-validation.ts';
 import { id } from './db.ts';
 import { storeFile } from './file-storage.ts';
@@ -26,6 +27,7 @@ export function displayValue(pages: Pages, property: Property, value: PropValue 
   return (Array.isArray(value) ? value : [value]).map(item => {
     if (property.options) return property.options.find(option => option.id === item)?.name ?? '';
     if (property.type === 'relation') { try { return actor ? pages.get(actor, String(item)).title : ''; } catch { return ''; } }
+    if (property.type === 'files') { try { return decodeURIComponent(String(item).split('/').at(-1) ?? ''); } catch { return ''; } }
     if (property.type === 'person') return pages.s.get('users', String(item))?.name ?? '';
     return String(item);
   }).join(';');
@@ -36,18 +38,20 @@ function markdown(pages: Pages, page: Page, actor: Actor): string {
   return '---\ntitle: ' + JSON.stringify(page.title) + '\n' + schema.map(property => JSON.stringify(property.name) + ': ' + JSON.stringify(displayValue(pages, property, page.props[property.id], actor)) + '\n').join('') + '---\n\n' + docToMarkdown(page.content) + '\n';
 }
 function subtree(pages: Pages, actor: Actor, root: Page): Page[] {
-  return pages.list(actor, root.workspaceId).filter(page => page.id === root.id || pages.ancestors(page).some(parent => parent.id === root.id)).map(clean);
+  return pages.list(actor, root.workspaceId).filter(page => page.id === root.id || pages.ancestors(page).some(parent => parent.id === root.id)).map(p=>clean(pages.computed(actor,p)));
 }
 export function exportPage(pages: Pages, actor: Actor, pageId: string, format: string): string {
-  const page = pages.get(actor, pageId);
-  if (format === 'json') return JSON.stringify({ version: 1, pages: subtree(pages, actor, page) }, null, 2);
+  const page = pages.computed(actor,pages.get(actor, pageId));
+  if (format === 'json') {const visible=subtree(pages,actor,page);const ids=new Set(visible.map(p=>p.id));return JSON.stringify({ version: 1, pages: visible, comments:pages.s.all('comments').filter(c=>ids.has(c.pageId)) }, null, 2);}
   if (format === 'md' && page.kind !== 'database') return markdown(pages, page, actor);
   if (format === 'csv' && page.kind === 'database') return [ ['Name', ...page.schema.map(property => property.name)], ...pages.rows(actor, page.id).map(row => [row.title, ...page.schema.map(property => displayValue(pages, property, row.props[property.id], actor))]) ].map(row => row.map(quote).join(',')).join('\r\n');
   return fail(400, 'Use md for pages, csv for databases, or json.');
 }
 const safeName = (title: string) => title.replace(/[\\/\x00-\x1f]/g, '_').replace(/^\.+$/, '_') || 'Untitled';
 export async function exportWorkspace(pages: Pages, actor: Actor, wid: string): Promise<Uint8Array> {
-  const visible = pages.list(actor, wid).map(clean);
+  const visible = pages.list(actor, wid).map(p=>clean(pages.computed(actor,p)));
+  const visibleIds=new Set(visible.map(p=>p.id));
+  const comments=pages.s.all('comments').filter(c=>visibleIds.has(c.pageId));
   const stickies = pages.s.all<Sticky>('stickies').filter(note => note.workspaceId === wid && (note.visibility !== 'private' || note.createdBy === actor.user.id));
   const layouts = pages.s.all('layouts').filter(layout => layout.workspaceId === wid && (layout.id === wid || layout.id === wid + ':' + actor.user.id));
   const entries: Record<string, Uint8Array> = {};
@@ -60,7 +64,7 @@ export async function exportWorkspace(pages: Pages, actor: Actor, wid: string): 
     if ([...paths.values()].includes(path)) path += ' ' + page.id;
     paths.set(page.id, path); return path;
   };
-  for (const page of visible) {
+  for (const page of visible.filter(p=>!pages.isTemplate(p))) {
     const path = pathFor(page);
     entries[path + (page.kind === 'database' ? '.csv' : '.md')] = strToU8(exportPage(pages, actor, page.id, page.kind === 'database' ? 'csv' : 'md'));
   }
@@ -75,7 +79,7 @@ export async function exportWorkspace(pages: Pages, actor: Actor, wid: string): 
     for (const file of files) text = text.split(`/files/${file.id}/${encodeURIComponent(file.name)}`).join(posix.relative(posix.dirname(path), 'files/' + file.id + '/' + safeName(file.name)));
     entries[path] = strToU8(text);
   }
-  entries['cairn.json'] = strToU8(JSON.stringify({ version: 1, pages: visible, stickies, layouts, files }, null, 2));
+  entries['cairn.json'] = strToU8(JSON.stringify({ version: 1, pages: visible, stickies, layouts, files, comments }, null, 2));
   return zipSync(entries);
 }
 
@@ -175,17 +179,29 @@ async function importJson(pages: Pages, actor: Actor, wid: string, parentId: str
     const imported = rewrite(original, ids, urls) as Page;
     const root = !source.some(page => page.id === original.parentId);
     const parent = root ? parentId : imported.parentId;
-    const input = pageCreate.parse({ ...imported, parentId: parent, props: imported.kind === 'row' ? imported.props : undefined, schema: imported.kind === 'database' ? imported.schema : undefined, views: imported.kind === 'database' ? imported.views : undefined });
+    if(imported.kind==='row'){const sourceParent=source.find(p=>p.id===original.parentId);const schema=sourceParent?rewrite(sourceParent.schema,ids,urls):pages.s.get<Page>('pages',parent??'')?.schema??[];for(const property of schema)if(['files','rollup','formula'].includes(property.type))delete imported.props[property.id];}
+    const input = pageCreate.parse({ ...imported, defaultTemplateId:imported.kind==='database'?imported.defaultTemplateId:undefined, parentId: parent, props: imported.kind === 'row' ? imported.props : undefined, schema: imported.kind === 'database' ? imported.schema.filter(p=>p.type!=='rollup') : undefined, views: imported.kind === 'database' ? imported.views : undefined });
     if (root && input.kind === 'row' && (!parent || pages.get(actor, parent).kind !== 'database')) input.kind = 'page', input.props = undefined;
     const next = pages.create(actor, wid, input);
     // Allocate predetermined ids so forward references remain valid.
     pages.s.remove('pages', next.id); pages.s.db.prepare('DELETE FROM search WHERE id=?').run(next.id);
     next.id = imported.id; next.position = original.position ?? next.position;
-    if (original.kind === 'database') { next.schema = imported.schema; next.views = imported.views; }
+    if (original.kind === 'database') { next.views = imported.views; }
     pages.change(actor, next, 'updated');
     next.createdAt = original.createdAt ?? next.createdAt; next.updatedAt = original.updatedAt ?? next.updatedAt;
     pages.s.put('pages', next); created.add(original.id); if (root) top.push(next.id);
   }
+  // Resolve computed schemas and default templates after every referenced database/row exists.
+  const databases=source.filter(p=>p.kind==='database').map(original=>rewrite(original,ids,urls) as Page);
+  const schemas=new Map(databases.map(database=>[database.id,database.schema]));
+  for(const database of databases)validateSchema(pages,actor,wid,database.schema,database.id,schemas);
+  for(const database of databases){
+    const next=pages.get(actor,database.id,true);
+    if(database.defaultTemplateId){const template=pages.get(actor,database.defaultTemplateId);if(!template.isTemplate||template.kind!=='row'||template.parentId!==next.id)fail(400,'Invalid imported default template.');}
+    next.schema=database.schema;next.defaultTemplateId=database.defaultTemplateId??null;pages.change(actor,next,'updated');
+  }
+  for(const comment of data.comments??[]){if(!ids.has(comment.pageId)||typeof comment.body!=='string'||comment.body.length>5000)continue;if(!ids.has(comment.id))ids.set(comment.id,id());if(!ids.has(comment.threadId))ids.set(comment.threadId,id());}
+  for(const comment of data.comments??[]){if(!ids.has(comment.id)||!ids.has(comment.pageId))continue;const key=ids.get(comment.id)!;pages.s.put('comments',{id:key,pageId:ids.get(comment.pageId)!,threadId:ids.get(comment.threadId)!,quote:typeof comment.quote==='string'?comment.quote:'',body:comment.body,resolved:!!comment.resolved,createdBy:actor.user.id,createdByName:actor.user.name,createdByType:actor.actorType,createdAt:comment.createdAt??new Date().toISOString(),updatedAt:comment.updatedAt??new Date().toISOString()});}
   const dashboard = new Dashboard(pages);
   for (const note of notes) { assertTransferAccess(pages, actor, wid); const imported = dashboard.add(actor, wid, note); if (note.position !== undefined) { imported.position = note.position; pages.s.put('stickies', imported); } }
   for (const layout of layouts) { assertTransferAccess(pages, actor, wid); dashboard.setHome(actor, wid, rewrite(layout.widgets, ids, urls), layout.id !== layout.workspaceId); }

@@ -51,6 +51,19 @@ function inline(rich: any[] = []): DocNode[] {
   });
 }
 const para = (rich: any[] = []): DocNode => ({ type: 'paragraph', content: inline(rich) });
+/** Computed columns are exported as snapshot values, never as Notion formulas/rollups. */
+function exportPropertyType(property: Property): string {
+  if (property.type === 'formula') {
+    const result = property.formula?.resultType;
+    return result === 'number' || result === 'checkbox' || result === 'date' ? result : 'rich_text';
+  }
+  if (property.type === 'rollup') {
+    const fn = property.rollup?.fn;
+    return fn === 'earliest' || fn === 'latest' ? 'date' : fn === 'show' ? 'rich_text' : 'number';
+  }
+  if (['relation', 'person', 'text', 'files'].includes(property.type)) return 'rich_text';
+  return property.type === 'status' ? 'select' : property.type;
+}
 /** A token is held only by the in-flight task instance, never by the Store or Job. */
 export class Notion {
   private lastRequest = 0;
@@ -272,7 +285,7 @@ export class Notion {
 
   async export(pageId: string, notionParentPageId: string, progress: (message: string) => void): Promise<string> {
     this.mutatingTask = true; this.check();
-    const page = this.pages.get(this.actor, pageId);
+    const page = this.pages.computed(this.actor, this.pages.get(this.actor, pageId));
     if (page.workspaceId !== this.wid) throw new Error('Page belongs to another workspace.');
     progress('Exporting ' + page.title);
     const title = this.rich([{ type: 'text', text: page.title || 'Untitled' }]).slice(0, 100);
@@ -282,34 +295,35 @@ export class Notion {
       for (const property of page.schema) {
         let name = property.name || 'Property'; while (properties[name]) name += ' ';
         names.set(property.id, name);
-        const type = ['relation', 'person', 'status'].includes(property.type) ? property.type === 'status' ? 'select' : 'rich_text' : property.type === 'text' ? 'rich_text' : property.type;
+        const type = exportPropertyType(property);
         properties[name] = { [type]: property.options ? { options: property.options.map(option => ({ name: option.name, color: option.color === 'teal' ? 'blue' : option.color })) } : {} };
       }
       const database = await this.request('POST', '/databases', { parent: { type: 'page_id', page_id: notionParentPageId }, title, initial_data_source: { properties } });
       const sourceId = database.data_sources?.[0]?.id;
       if (!sourceId) throw new Error('Created Notion database has no data source.');
-      const rows = this.pages.list(this.actor, this.wid).filter(row => row.parentId === page.id && row.kind === 'row'); let count = 0;
+      const rows = this.pages.list(this.actor, this.wid).filter(row => row.parentId === page.id && row.kind === 'row' && !this.pages.isTemplate(row)).map(row => this.pages.computed(this.actor, row)); let count = 0;
       for (const row of rows) {
         const values: Record<string, any> = { Name: { title: this.rich([{ type: 'text', text: row.title || 'Untitled' }]).slice(0, 100) } };
         for (const property of page.schema) {
           const value = row.props[property.id]; if (value == null) continue;
           const display = displayValue(this.pages, property, value, this.actor), name = names.get(property.id)!;
-          if (property.type === 'number' || property.type === 'checkbox' || property.type === 'url') values[name] = { [property.type]: value };
-          else if (property.type === 'date') values[name] = { date: { start: value } };
+          const type = exportPropertyType(property);
+          if (type === 'number' || type === 'checkbox' || type === 'url') values[name] = { [type]: value };
+          else if (type === 'date') values[name] = { date: { start: value } };
           else if (property.type === 'select' || property.type === 'status') values[name] = { select: display ? { name: display } : null };
           else if (property.type === 'multi_select') values[name] = { multi_select: (Array.isArray(value) ? value : []).flatMap(optionId => { const option = property.options?.find(option => option.id === optionId); return option ? [{ name: option.name }] : []; }) };
           else values[name] = { rich_text: this.rich([{ type: 'text', text: display }]).slice(0, 100) };
         }
         const created = await this.request('POST', '/pages', { parent: { type: 'data_source_id', data_source_id: sourceId }, properties: values });
         await this.append(created.id, this.exportBlocks(row.content?.content ?? []));
-        for (const child of this.pages.list(this.actor, this.wid).filter(child => child.parentId === row.id)) await this.export(child.id, created.id, progress);
+        for (const child of this.pages.list(this.actor, this.wid).filter(child => child.parentId === row.id && !this.pages.isTemplate(child))) await this.export(child.id, created.id, progress);
         progress(page.title + ': ' + (++count) + ' of ' + rows.length + ' rows');
       }
       return database.url ?? 'https://www.notion.so/' + norm(database.id);
     }
     const created = await this.request('POST', '/pages', { parent: { type: 'page_id', page_id: notionParentPageId }, properties: { title: { title } }, ...(page.icon ? { icon: { type: 'emoji', emoji: page.icon } } : {}) });
     await this.append(created.id, this.exportBlocks(page.content?.content ?? []));
-    for (const child of this.pages.list(this.actor, this.wid).filter(child => child.parentId === page.id)) await this.export(child.id, created.id, progress);
+    for (const child of this.pages.list(this.actor, this.wid).filter(child => child.parentId === page.id && !this.pages.isTemplate(child))) await this.export(child.id, created.id, progress);
     return created.url ?? 'https://www.notion.so/' + norm(created.id);
   }
 }

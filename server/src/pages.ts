@@ -3,8 +3,17 @@ import { fail, membership } from './common.ts';
 import { Store, id, now } from './db.ts';
 import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { backlinks, capture } from './collaboration.ts';
+import type { Notifications } from './notifications.ts';
+import { computeRows } from '../../shared/compute.ts';
+import { rebuildLinks } from './links.ts';
+import { validateSchema, validateProps, validateRepeat, normalizeReminders } from './page-fields.ts';
+import { dateInZone, nextRepeatDate } from './repeat.ts';
+import { templateList, templateInput, copyChildren, saveTemplate } from './templates.ts';
+import { listComments, addComment } from './comments.ts';
+import { listChanges, recordChange } from './changes.ts';
 import { Events } from './events.ts';
-import type { Activity, DocNode, Page, PageKind, PageVersion, Row, SearchHit } from '../../shared/types.ts';
+import type { Activity, DocNode, Page, PageKind, PageVersion, Property, Row, SearchHit } from '../../shared/types.ts';
 import { docToPlainText } from '../../shared/markdown.ts';
 import type { PageCreate, PagePatch } from './page-validation.ts';
 export { pageCreate, pagePatch, property } from './page-validation.ts';
@@ -21,10 +30,22 @@ export interface StoredVersion extends PageVersion {
   actorId: string;
 }
 interface StoredActivity extends Activity { workspaceId: string; actorId: string }
-type PageChange = 'created' | 'updated' | 'deleted' | 'restored' | 'moved' | 'shared';
+type PageChange = Activity['action'];
 
 export class Pages {
+  notifications?: Notifications;
+  private lastChangeId?: string;
   constructor(public s: Store, public events: Events) {}
+
+  isTemplate(page: Page): boolean { return page.isTemplate || this.ancestors(page).some(p=>p.isTemplate); }
+  backlinks = (actor: Actor,pageId: string) => backlinks(this,actor,pageId);
+  capture = (actor: Actor,input: {title?:string;text?:string;url?:string;workspaceId?:string;databaseId?:string}) => capture(this,actor,input);
+  today(actor: Actor): string { return dateInZone(this.notifications?.clock()??new Date(),actor.user.prefs.timezone); }
+  templates = (actor: Actor,wid: string,databaseId?: string) => templateList(this,actor,wid,databaseId);
+  saveAsTemplate = (actor: Actor,pageId: string,title?: string) => saveTemplate(this,actor,pageId,title);
+  comments = (actor: Actor,pageId: string) => listComments(this,actor,pageId);
+  addComment = (actor: Actor,pageId: string,input: {body:string;quote?:string;threadId?:string}) => addComment(this,actor,pageId,input);
+  changes = (actor: Actor,wid: string,options: {actor?:string;client?:string;before?:string;limit?:number}={}) => listChanges(this,actor,wid,options);
 
   ancestors(page: Page): Page[] {
     const result: Page[] = [];
@@ -78,9 +99,9 @@ export class Pages {
   rows(actor: Actor, pageId: string): Row[] {
     const database = this.get(actor, pageId);
     if (database.kind !== 'database') fail(400, 'This page is not a database.');
-    return this.list(actor, database.workspaceId)
-      .filter(page => page.parentId === pageId && page.kind === 'row')
-      .sort((a, b) => a.position - b.position).map(page => this.row(page));
+    return this.compute(actor,database,this.list(actor, database.workspaceId)
+      .filter(page => page.parentId === pageId && page.kind === 'row' && !this.isTemplate(page))
+      .sort((a, b) => a.position - b.position).map(page => this.row(page)));
   }
 
   position(actor: Actor, workspaceId: string, parentId: string | null, afterId?: string | null, exclude?: string): number {
@@ -111,26 +132,47 @@ export class Pages {
 
   index(page: Page): void { this.s.indexPage(page); }
 
-  change(actor: Actor, page: Page, action: PageChange): StoredPage {
-    page.updatedAt = now();
+  change(actor: Actor, page: Page, action: PageChange, merge = true, propertySchema?: Property[]): StoredPage {
+    const before = this.s.get<Page>('pages',page.id);
+    page.updatedAt = new Date(Math.max(Date.now(),Date.parse(before?.updatedAt ?? '')+1 || 0)).toISOString();
     page.updatedBy = actor.user.id;
     page.updatedByType = actor.actorType;
     this.s.put('pages', page);
     this.index(page);
-    this.s.put('activity', {
-      id: id(), workspaceId: page.workspaceId, actorId: actor.user.id, at: now(),
-      actorName: actor.user.name, actorType: actor.actorType, action,
+    rebuildLinks(this.s,page,actor.requestOrigin);
+    const activity: StoredActivity = {
+      id: id(), workspaceId: page.workspaceId, actorId: actor.user.id, at: page.updatedAt,
+      actorName: actor.user.name, actorType: actor.actorType, action, clientName: actor.clientName ?? null,
       pageId: page.id, pageTitle: page.title, pageIcon: page.icon,
-    });
+    };
+    this.s.put('activity',activity);
+    this.lastChangeId=recordChange(this,actor,page,before,activity,merge,propertySchema);
+    void this.notifications?.pageChanged(actor,page,before).catch(()=>{});
     this.events.emit(page.workspaceId, {
       type: 'page', pageId: page.id, parentId: page.parentId,
-      change: action === 'shared' ? 'updated' : action,
+      change: ['shared','repeated','undone','joined'].includes(action) ? 'updated' : action as 'created'|'updated'|'deleted'|'restored'|'moved',
       actorId: actor.user.id, actorType: actor.actorType, clientId: actor.clientId,
     });
     return page;
   }
 
+  compute<T extends {id:string;title:string;props:Page['props']}>(actor:Actor,database:Page,rows:T[]):T[] {
+    const visible=this.list(actor,database.workspaceId).filter(p=>!this.isTemplate(p));
+    return computeRows(rows,database.schema,{
+      getRows:databaseId=>visible.filter(p=>p.kind==='row'&&p.parentId===databaseId),
+      getSchema:databaseId=>visible.find(p=>p.id===databaseId&&p.kind==='database')?.schema??[],
+      getPersonName:userId=>this.s.get('users',userId)?.name??'', userId:actor.user.id,today:this.today(actor),
+    });
+  }
+  computed(actor:Actor,page:Page):Page {
+    if(page.kind!=='row'||!page.parentId)return page;
+    const database=this.get(actor,page.parentId);
+    return {...this.compute(actor,database,[{...page,isTemplate:false}])[0],isTemplate:page.isTemplate};
+  }
+
   validateFields(kind: PageKind, input: PagePatch): void {
+    if (kind !== 'row' && input.repeat) fail(400,'Only rows can repeat.');
+    if (kind !== 'database' && input.defaultTemplateId !== undefined) fail(400,'Only databases have default templates.');
     if (kind !== 'row' && input.props !== undefined) fail(400, 'Only rows have properties.');
     if (kind !== 'database' && (input.schema !== undefined || input.views !== undefined))
       fail(400, 'Only databases have schemas and views.');
@@ -138,7 +180,9 @@ export class Pages {
 
   create(actor: Actor, workspaceId: string, input: PageCreate): StoredPage {
     membership(this.s, actor, workspaceId, true);
-    const parentId = input.parentId ?? null;
+    const applied=templateInput(this,actor,workspaceId,input,this.today(actor));
+    input=applied.input;
+    const parentId = input.isTemplate && (input.kind??'page')==='page' ? null : input.parentId ?? null;
     const parent = parentId ? this.get(actor, parentId, true) : null;
     if (parent && parent.workspaceId !== workspaceId) fail(400, 'Parent belongs to another workspace.');
     const kind = input.kind ?? 'page';
@@ -155,6 +199,9 @@ export class Pages {
       }];
       if (!views.length) views = [{ id: id(), name: 'Table', type: 'table', filters: [], sorts: [] }];
     }
+    if(kind==='database')validateSchema(this,actor,workspaceId,schema);
+    if(kind==='row')validateProps(this,actor,parent,input.props??{});
+    validateRepeat(parent?.schema??[],input.repeat??null,kind);
     const at = now();
     const page: Page = {
       id: id(), workspaceId, parentId, kind, title: input.title ?? '', icon: input.icon ?? '',
@@ -163,8 +210,12 @@ export class Pages {
       views: kind === 'database' ? views : [], position: this.position(actor, workspaceId, parentId, input.afterId),
       createdBy: actor.user.id, updatedBy: actor.user.id, updatedByType: actor.actorType,
       createdAt: at, updatedAt: at, deletedAt: null,
+      repeat:input.repeat??null,reminders:[],isTemplate:input.isTemplate??false,defaultTemplateId:null,
     };
-    return this.change(actor, page, 'created');
+    if(input.reminders)page.reminders=normalizeReminders(this,actor,page,input.reminders);
+    const result=this.change(actor, page, 'created');
+    if(applied.template?.kind==='page')copyChildren(this,actor,applied.template,page);
+    return result;
   }
 
   snapshot(actor: Actor, page: Page, force = false): void {
@@ -184,6 +235,14 @@ export class Pages {
   patch(actor: Actor, pageId: string, input: PagePatch): StoredPage {
     const page = this.get(actor, pageId, true);
     const previousSchema = page.schema;
+    const parent=page.parentId?this.get(actor,page.parentId):null;
+    if(input.schema)validateSchema(this,actor,page.workspaceId,input.schema,page.id);
+    if(input.props)validateProps(this,actor,parent,input.props);
+    if(input.repeat!==undefined)validateRepeat(parent?.schema??[],input.repeat,page.kind);
+    if(input.defaultTemplateId){const template=this.get(actor,input.defaultTemplateId);if(!template.isTemplate||template.kind!=='row'||template.parentId!==page.id)fail(400,'Default template must be a template row in this database.');}
+    const oldDone=page.repeat?page.props[page.repeat.doneProp]:undefined;
+    const oldDate=page.repeat?page.props[page.repeat.dateProp]:undefined;
+    if(input.reminders)input={...input,reminders:normalizeReminders(this,actor,page,input.reminders)};
     this.validateFields(page.kind, input);
     if (input.title !== undefined || input.content !== undefined) this.snapshot(actor, page);
     if (input.props) {
@@ -194,10 +253,21 @@ export class Pages {
     }
     const { props, ...rest } = input;
     Object.assign(page, rest);
+    if(page.isTemplate&&page.kind==='page')page.parentId=null;
+    let action:PageChange='updated';
+    if(page.repeat&&input.props&&Object.hasOwn(input.props,page.repeat.doneProp)&&oldDone!==page.repeat.doneValue&&page.props[page.repeat.doneProp]===page.repeat.doneValue){
+      const next=nextRepeatDate(page.repeat,typeof oldDate==='string'?oldDate:this.today(actor),this.today(actor));
+      action='repeated';
+      page.reminders=page.reminders.map(r=>({...r,lastFiredFor:null}));
+      if(next){page.props[page.repeat.dateProp]=next;page.props[page.repeat.doneProp]=page.repeat.resetValue;}else page.repeat=null;
+    }
     const save = () => {
-      const result = this.change(actor, page, 'updated');
+      if(input.isTemplate===false)this.clearDefault(actor,page);
+      const result = this.change(actor, page, action);
+      const parentChangeId=this.lastChangeId;
       if (page.kind === 'database' && input.schema !== undefined) {
         for (const row of this.s.all<Page>('pages').filter(row => row.parentId === page.id && row.kind === 'row')) {
+          const oldProps=JSON.stringify(row.props);
           for (const oldProperty of previousSchema) {
             const property = page.schema.find(property => property.id === oldProperty.id);
             if (!property) { delete row.props[oldProperty.id]; continue; }
@@ -207,13 +277,20 @@ export class Pages {
             if (Array.isArray(value)) row.props[property.id] = value.filter(option => !removed.has(option));
             else if (typeof value === 'string' && removed.has(value)) delete row.props[property.id];
           }
-          this.s.put('pages', row);
-          this.index(row);
+          if(JSON.stringify(row.props)!==oldProps){
+            this.change(actor,row,'updated',false,previousSchema);
+            if(parentChangeId&&this.lastChangeId){const parentChange=this.s.get('changes',parentChangeId);parentChange.relatedIds=[...(parentChange.relatedIds??[]),this.lastChangeId];this.s.put('changes',parentChange);}
+          }else{this.index(row);rebuildLinks(this.s,row,actor.requestOrigin);}
         }
       }
       return result;
     };
-    return input.schema !== undefined ? this.s.transaction(save) : save();
+    return this.s.transaction(save);
+  }
+
+  clearDefault(actor:Actor,page:Page):void {
+    const database=page.parentId?this.s.get<Page>('pages',page.parentId):undefined;
+    if(database?.defaultTemplateId===page.id){database.defaultTemplateId=null;this.change(actor,database,'updated');}
   }
 
   move(actor: Actor, pageId: string, parentId: string | null, afterId?: string | null): StoredPage {
@@ -223,9 +300,13 @@ export class Pages {
         this.ancestors(parent).some(ancestor => ancestor.id === page.id)))
       fail(400, 'A page cannot be moved into itself, its descendants, or another workspace.');
     if (page.kind === 'row' && parent?.kind !== 'database') fail(400, 'Rows must stay in a database.');
-    page.position = this.position(actor, page.workspaceId, parentId, afterId, page.id);
-    page.parentId = parentId;
-    return this.change(actor, page, 'moved');
+    if(page.isTemplate&&page.kind==='page'&&parentId!==null)fail(400,'Page templates must stay at the root.');
+    return this.s.transaction(()=>{
+      const position=this.position(actor,page.workspaceId,parentId,afterId,page.id);
+      if(page.parentId!==parentId)this.clearDefault(actor,page);
+      page.position=position;page.parentId=parentId;
+      return this.change(actor,page,'moved');
+    });
   }
 
   duplicate(actor: Actor, pageId: string): StoredPage {
@@ -252,6 +333,7 @@ export class Pages {
   remove(actor: Actor, pageId: string, permanent = false): void {
     const page = this.get(actor, pageId, true, true);
     if (!permanent) {
+      if(page.parentId){const database=this.s.get<Page>('pages',page.parentId);if(database?.defaultTemplateId===page.id){database.defaultTemplateId=null;this.change(actor,database,'updated');}}
       page.deletedAt = now();
       this.change(actor, page, 'deleted');
       return;
@@ -262,6 +344,8 @@ export class Pages {
     const descendants = this.s.all<Page>('pages').filter(candidate => this.ancestors(candidate).some(ancestor => ancestor.id === page.id));
     for (const removed of [page, ...descendants]) {
       this.s.remove('pages', removed.id);
+      this.s.db.prepare('DELETE FROM links WHERE fromId=? OR toId=?').run(removed.id,removed.id);
+      for(const c of this.s.all('comments').filter(c=>c.pageId===removed.id))this.s.remove('comments',c.id);
       this.s.db.prepare('DELETE FROM search WHERE id=?').run(removed.id);
       for (const version of this.s.all<StoredVersion>('versions').filter(version => version.pageId === removed.id))
         this.s.remove('versions', version.id);
@@ -279,7 +363,7 @@ export class Pages {
   }
 
   search(actor: Actor, workspaceId: string, queryText: string, limit = 30): SearchHit[] {
-    const pages = new Map(this.list(actor, workspaceId).map(page => [page.id, page]));
+    const pages = new Map(this.list(actor, workspaceId).filter(p=>!this.isTemplate(p)).map(page => [page.id, page]));
     const terms = queryText.match(/[\p{L}\p{N}_]+/gu);
     if (!terms?.length) return [];
     const query = terms.map((term, index) => '"' + term + '"' + (index === terms.length - 1 ? '*' : '')).join(' AND ');
@@ -302,13 +386,16 @@ export class Pages {
   }
 
   deleteWorkspace(workspaceId: string): void {
+    const ids=new Set(this.s.all<Page>('pages').filter(p=>p.workspaceId===workspaceId).map(p=>p.id));
+    for(const c of this.s.all('comments').filter(c=>ids.has(c.pageId)))this.s.remove('comments',c.id);
+    for(const key of ids)this.s.db.prepare('DELETE FROM links WHERE fromId=? OR toId=?').run(key,key);
     for (const page of this.s.all<Page>('pages').filter(page => page.workspaceId === workspaceId)) {
       this.s.remove('pages', page.id);
       this.s.db.prepare('DELETE FROM search WHERE id=?').run(page.id);
       for (const version of this.s.all<StoredVersion>('versions').reverse().filter(version => version.pageId === page.id))
         this.s.remove('versions', version.id);
     }
-    for (const table of ['invites', 'activity', 'files', 'tokens', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthGrants'] as const) {
+    for (const table of ['invites', 'activity', 'files', 'tokens', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthGrants','comments','changes','notifications'] as const) {
       for (const value of this.s.all<{ id: string; workspaceId: string }>(table).filter(value => value.workspaceId === workspaceId)) {
         if (table === 'files') {
           try { unlinkSync(join(this.s.dataDir, 'files', value.id)); }

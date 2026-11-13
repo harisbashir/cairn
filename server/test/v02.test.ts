@@ -15,9 +15,9 @@ describe('v0.2 REST contract and OAuth',()=>{
   beforeEach(async()=>{dir=mkdtempSync(join(tmpdir(),'cairn-v02-'));app=createApp({dataDir:dir});const r=await request('/api/v1/auth/signup','POST',{email:'owner@example.com',name:'Owner',password:'password123',token:true},'',{'X-Cairn-Client':'test'});const boot:any=await r.json();expect(r.status).toBe(200);expect(r.headers.get('set-cookie')).toBeNull();session=boot.sessionToken;wid=boot.workspaces[0].id;const login=await request('/api/auth/login','POST',{email:'owner@example.com',password:'password123'},'',{'X-Cairn-Client':'test'});cookie=login.headers.get('set-cookie')!.split(';')[0];});
   afterEach(()=>rmSync(dir,{recursive:true,force:true}));
   it('uses bearer sessions, stable aliases, preferences and read-only scoped API credentials',async()=>{
-    expect((await (await request('/api/v1/bootstrap')).json() as any).user.prefs).toEqual({theme:'system',accent:'blue'});
+    expect((await (await request('/api/v1/bootstrap')).json() as any).user.prefs).toEqual({theme:'system',accent:'blue',timezone:'UTC',reminderHour:9,capture:null,notify:{push:true,email:false,mentions:true,comments:true,assigned:true}});
     expect((await request('/api/me','PATCH',{prefs:{theme:'dark'}})).status).toBe(200);
-    expect((await (await request('/api/me','PATCH',{prefs:{accent:'green'}})).json() as any).prefs).toEqual({theme:'dark',accent:'green'});
+    expect((await (await request('/api/me','PATCH',{prefs:{accent:'green'}})).json() as any).prefs).toEqual({theme:'dark',accent:'green',timezone:'UTC',reminderHour:9,capture:null,notify:{push:true,email:false,mentions:true,comments:true,assigned:true}});
     expect((await request('/api/me','PATCH',{prefs:{theme:'wrong'}})).status).toBe(400);
     const read:any=await (await request('/api/tokens','POST',{name:'reader',access:'read',workspaceId:wid})).json();
     expect((await request(`/api/v1/workspaces/${wid}/tree`,'GET',undefined,read.secret)).status).toBe(200);

@@ -704,3 +704,25 @@ button.cell:hover { background: var(--hover); }
 .list-row, .gv-card, .fd-post * { min-width: 0; }
 .gv-title, .list-row .t { overflow-wrap: anywhere; }
 .kcard .t, .pcard-main .t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+
+/* ---------- Print and Save as PDF ---------- */
+@media print {
+  @page { margin: 16mm 14mm; }
+  :root, html, body { color-scheme: light; background: #fff !important; color: #111 !important; height: auto !important; overflow: visible !important; }
+  #root, .shell, .main, .content { display: block !important; height: auto !important; overflow: visible !important; }
+  .sidebar, .tabbar, .topbar, .page-tools, .toast, .menu, .popover, .bubble-menu, .slash-menu,
+  .view-tabs, .view-toolbar, .db-toolbar, .add-row, .new-row, .fab, .no-print, button:not(.print-keep) { display: none !important; }
+  .page, .page.wide { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+  .page-cover { height: 90px !important; }
+  .page-title { font-size: 26pt !important; }
+  a { color: inherit !important; text-decoration: underline; }
+  .ProseMirror { font-size: 11pt; line-height: 1.5; }
+  .ProseMirror h1, .ProseMirror h2, .ProseMirror h3 { break-after: avoid; }
+  .ProseMirror pre, .ProseMirror blockquote, .callout, .ProseMirror img, .ProseMirror table, details, tr, .card { break-inside: avoid; }
+  .ProseMirror details > div, .ProseMirror details [data-details-content] { display: block !important; }
+  .callout, .ProseMirror pre, .ProseMirror code { background: #f4f4f5 !important; color: #111 !important; }
+  table { border-collapse: collapse !important; width: 100% !important; }
+  th, td { border: 0.5pt solid #bbb !important; color: #111 !important; background: #fff !important; position: static !important; }
+  thead { display: table-header-group; }
+  * { box-shadow: none !important; backdrop-filter: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

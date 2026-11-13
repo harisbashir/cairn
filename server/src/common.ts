@@ -14,6 +14,8 @@ export interface Actor {
   user: User;
   actorType: ActorType;
   clientId: string | null;
+  clientName?: string | null;
+  requestOrigin?: string;
   access?: 'read' | 'write';
   workspaceId?: string | null;
 }
@@ -53,7 +55,7 @@ export function membership(s: Store, actor: Actor, wid: string, write = false, m
 
 export function publicUser(user: User & { passwordHash?: string; salt?: string }): User {
   const { passwordHash, salt, ...value } = user;
-  return { ...value, prefs: Object.assign({ theme: 'system', accent: 'blue' }, value.prefs) };
+  return { ...value, prefs: Object.assign({ theme: 'system' as const, accent: 'blue' as const, timezone: 'UTC', reminderHour: 9, capture: null }, value.prefs, {notify:Object.assign({push:true,email:false,mentions:true,comments:true,assigned:true},value.prefs?.notify)}) };
 }
 
 export function publicUrl(c: Context, path = ''): string {

@@ -42,7 +42,7 @@ describe('MCP in-process Streamable HTTP', () => {
     expect(initialized.result.serverInfo.name).toBe('cairn');
     expect(initialized.result.instructions).toContain('Markdown');
     const tools = await rpc('tools/list');
-    expect(tools.result.tools).toHaveLength(34);
+    expect(tools.result.tools).toHaveLength(42);
     expect(result(await call('list_workspaces'))[0].id).toBe(workspaceId);
     expect((await app.request('/mcp')).status).toBe(401);
     expect((await app.request('/mcp')).headers.get('www-authenticate')).toContain('Bearer resource_metadata=');

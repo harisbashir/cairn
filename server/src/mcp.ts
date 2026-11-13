@@ -23,12 +23,23 @@ const limitSchema = z.number().int().min(1).max(200).optional();
 const valueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]);
 const valuesSchema = z.record(z.string(), valueSchema);
 const optionSchema = z.union([z.string(), z.object({ name: z.string(), color: z.enum(['gray', 'brown', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'red']).optional() })]);
-const propertySchema = z.object({ name: z.string().min(1), type: z.enum(['text', 'number', 'select', 'multi_select', 'status', 'date', 'checkbox', 'url', 'person', 'relation']), options: z.array(optionSchema).optional() });
+const propertySchema = z.object({ name: z.string().min(1), type: z.enum(['text', 'number', 'select', 'multi_select', 'status', 'date', 'checkbox', 'url', 'person', 'relation', 'files', 'rollup', 'formula']), options: z.array(optionSchema).optional(), relation_database_id: identifier.optional(), relationDatabaseId: identifier.optional(), formula: z.object({expression:text}).optional(), rollup: z.object({relation:identifier,incoming_database:identifier.optional(),target:identifier,function:z.enum(['count','count_values','sum','avg','min','max','earliest','latest','percent_checked','show']),filters:z.array(z.object({property:identifier,op:z.enum(['contains','not_contains','eq','neq','gt','lt','gte','lte','is_empty','is_not_empty','checked','unchecked']),value:valueSchema.optional()})).optional()}).optional(), number_format:z.enum(['plain','comma','percent','currency']).optional() });
 const filterSchema = z.object({ property: z.string().optional(), propertyId: z.string().optional(), op: z.enum(['contains', 'not_contains', 'eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'is_empty', 'is_not_empty', 'checked', 'unchecked']), value: valueSchema.optional() }).refine(v => !!(v.property ?? v.propertyId), 'A filter requires a property name.');
 const sortSchema = z.object({ property: z.string().optional(), propertyId: z.string().optional(), dir: z.enum(['asc', 'desc']) }).refine(v => !!(v.property ?? v.propertyId), 'A sort requires a property name.');
 
-function newProperty(input: z.infer<typeof propertySchema>): Property {
-  return { id: id(), name: input.name, type: input.type, ...(input.options ? { options: input.options.map(option => ({ id: id(), name: typeof option === 'string' ? option : option.name, color: typeof option === 'string' ? 'gray' as const : option.color ?? 'gray' as const })) } : {}) };
+function newProperty(input: z.infer<typeof propertySchema>, database?: Page, pages?: Pages, actor?: Actor): Property {
+  const extra: Partial<Property> = { ...(input.formula ? {formula:input.formula}:{}), ...((input.relation_database_id??input.relationDatabaseId) ? {relationDatabaseId:input.relation_database_id??input.relationDatabaseId}:{}), ...(input.number_format?{numberFormat:input.number_format}:{}) };
+  if(input.rollup){
+    const config=input.rollup;
+    if(!database||!pages||!actor)fail(400,"Rollups require a database context.");
+    const incoming=config.incoming_database?(pages!.list(actor!,database!.workspaceId).find(p=>p.kind==='database'&&(p.id===config.incoming_database||p.title===config.incoming_database))??fail(400,'Incoming database not found.')):undefined;
+    const sourceDb=incoming??database!;
+    const relation=namedProperty(sourceDb,config.relation);
+    if(relation.type!=="relation")fail(400,"Rollup source must be a relation.");
+    const targetDb=config.incoming_database?sourceDb:databasePage(pages!,actor!,relation.relationDatabaseId??fail(400,"Relation requires a target database."));
+    extra.rollup={source:config.incoming_database?{kind:"incoming",databaseId:sourceDb.id,propertyId:relation.id}:{kind:"relation",propertyId:relation.id},target:config.target==="title"?"title":namedProperty(targetDb,config.target).id,fn:config.function,...(config.filters?{filters:config.filters.map(f=>{const prop=namedProperty(targetDb,f.property);return{propertyId:prop.id,op:f.op,...(f.value!==undefined?{value:prop.options&&typeof f.value==="string"?prop.options.find(o=>o.name===f.value||o.id===f.value)?.id??f.value:f.value}:{})};})}:{})};
+  }
+  return { ...extra, id: id(), name: input.name, type: input.type, ...(input.options ? { options: input.options.map(option => ({ id: id(), name: typeof option === 'string' ? option : option.name, color: typeof option === 'string' ? 'gray' as const : option.color ?? 'gray' as const })) } : {}) };
 }
 function namedProperty(database: Page, name: string): Property {
   return database.schema.find(property => property.name === name || property.id === name) ?? fail(400, `Property "${name}" does not exist.`);
@@ -53,6 +64,7 @@ function convertProperties(pages: Pages, actor: Actor, database: Page, input: Pr
   let changed = false;
   for (const [name, value] of Object.entries(input)) {
     const property = namedProperty(database, name);
+    if (property.type === 'rollup' || property.type === 'formula') fail(400, `Property "${name}" is computed and read only.`);
     if (value === null) { props[property.id] = null; continue; }
     const optionId = (name: string) => {
       property.options ??= [];
@@ -69,7 +81,7 @@ function convertProperties(pages: Pages, actor: Actor, database: Page, input: Pr
       case 'multi_select':
         if (!Array.isArray(value)) fail(400, `Property "${name}" requires an array of option names.`);
         props[property.id] = (value as string[]).map(optionId); break;
-      case 'person': case 'relation':
+      case 'files': case 'person': case 'relation':
         if (!Array.isArray(value)) fail(400, `Property "${name}" requires an array of ids.`);
         props[property.id] = value; break;
       case 'number':
@@ -87,8 +99,9 @@ function convertProperties(pages: Pages, actor: Actor, database: Page, input: Pr
   return props;
 }
 function describePage(pages: Pages, actor: Actor, page: Page) {
+  page = pages.computed(actor, page);
   const database = page.kind === 'row' && page.parentId ? databasePage(pages, actor, page.parentId) : null;
-  return { id: page.id, workspaceId: page.workspaceId, parentId: page.parentId, kind: page.kind, title: page.title, icon: page.icon, path: [...pages.ancestors(page).map(p => p.title), page.title].join(' / '), properties: database ? namedProps(database, page.props) : {}, markdown: docToMarkdown(page.content), ...(page.kind === 'database' ? { schema: page.schema, views: page.views } : {}) };
+  return { id: page.id, workspaceId: page.workspaceId, parentId: page.parentId, kind: page.kind, title: page.title, icon: page.icon, path: [...pages.ancestors(page).map(p => p.title), page.title].join(' / '), properties: database ? namedProps(database, page.props) : {}, markdown: docToMarkdown(page.content), repeat:page.repeat, reminders:page.reminders, isTemplate:page.isTemplate, ...(page.kind === 'database' ? { schema: page.schema, views: page.views } : {}) };
 }
 function visibleWorkspaces(pages: Pages, actor: Actor) {
   const memberships = pages.s.db.prepare('SELECT workspaceId,role FROM memberships WHERE userId=?').all(actor.user.id);
@@ -112,6 +125,15 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
       }
     });
   }
+  function templateId(value:string|undefined,wid:string,dbid?:string) { return value ? (pages.templates(actor,wid,dbid).find(p=>p.id===value||p.title===value)?.id??fail(400,'Template not found.')) : undefined; }
+  tool('list_templates','List available page or database templates.',{workspace_id:identifier,database_id:identifier.optional()},false,input=>pages.templates(actor,input.workspace_id,input.database_id));
+  tool('save_as_template','Save a page as a reusable template.',{page_id:identifier,title:title.optional()},true,input=>pages.saveAsTemplate(actor,input.page_id,input.title));
+  tool('get_backlinks','Read visible pages linking to a page.',{page_id:identifier},false,input=>pages.backlinks(actor,input.page_id));
+  tool('list_comments','Read page comments.',{page_id:identifier},false,input=>pages.comments(actor,input.page_id));
+  tool('add_comment','Add a comment or a reply to a page.',{page_id:identifier,body:text,quote:text.optional(),thread_id:identifier.optional()},true,input=>pages.addComment(actor,input.page_id,{body:input.body,quote:input.quote,threadId:input.thread_id}));
+  tool('list_changes','Read visible workspace changes.',{workspace_id:identifier,actor:text.optional(),client:text.optional(),limit:limitSchema},false,input=>pages.changes(actor,input.workspace_id,input));
+  tool('capture','Capture text or a URL into the inbox or a database.',{title:title.optional(),text:text.optional(),url:text.optional(),workspace_id:identifier.optional(),database_id:identifier.optional()},true,input=>describePage(pages,actor,pages.capture(actor,{...input,workspaceId:input.workspace_id,databaseId:input.database_id})));
+  tool('add_property','Add a named database property.',{database_id:identifier,...propertySchema.shape},true,input=>{const db=databasePage(pages,actor,input.database_id,true);if(db.schema.some(p=>p.name===input.name))fail(400,'Property already exists.');return describePage(pages,actor,pages.patch(actor,db.id,{schema:[...db.schema,newProperty(input,db,pages,actor)]}));});
   tool('list_workspaces', 'List accessible workspaces and your roles.', {}, false, () => visibleWorkspaces(pages, actor));
   tool('search', 'Search accessible page titles, bodies and row properties.', { query: text, workspace_id: identifier.optional(), limit: limitSchema }, false, input => {
     const workspaces = input.workspace_id ? [{ id: input.workspace_id }] : visibleWorkspaces(pages, actor);
@@ -122,7 +144,7 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
     return pages.list(actor, input.workspace_id).filter(p => p.parentId === (input.parent_id ?? null)).sort((a, b) => a.position - b.position).map(p => ({ id: p.id, title: p.title, icon: p.icon, kind: p.kind, parentId: p.parentId }));
   });
   tool('get_page', 'Read a page, its path, named properties and Markdown body.', { page_id: identifier, include_children: z.boolean().optional() }, false, input => { const page=pages.get(actor,input.page_id);return {...describePage(pages,actor,page),...(input.include_children?{children:pages.list(actor,page.workspaceId).filter(p=>p.parentId===page.id).sort((a,b)=>a.position-b.position).map(p=>({id:p.id,title:p.title,icon:p.icon,kind:p.kind}))}:{})}; });
-  tool('create_page', 'Create a page with optional Markdown content.', { workspace_id: identifier, title, parent_id: identifier.optional(), markdown: text.optional(), icon: text.optional() }, true, input => describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, parentId: input.parent_id, icon: input.icon, content: input.markdown === undefined ? null : markdownToDoc(input.markdown) })));
+  tool('create_page', 'Create a page with optional Markdown content.', { workspace_id: identifier, title, parent_id: identifier.optional(), markdown: text.optional(), icon: text.optional(), template:identifier.optional() }, true, input => describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, parentId: input.parent_id, icon: input.icon, templateId: templateId(input.template,input.workspace_id), ...(input.markdown === undefined ? {} : {content: markdownToDoc(input.markdown)}) })));
   tool('update_page', 'Update a title or icon and optionally replace the Markdown body.', { page_id: identifier, title: title.optional(), icon: text.optional(), markdown: text.optional() }, true, input => describePage(pages, actor, pages.patch(actor, input.page_id, { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.icon !== undefined ? { icon: input.icon } : {}), ...(input.markdown !== undefined ? { content: markdownToDoc(input.markdown) } : {}) })));
   tool('append_to_page', 'Append Markdown blocks to a page body.', { page_id: identifier, markdown: text }, true, input => {
     const page = pages.get(actor, input.page_id, true);
@@ -135,7 +157,9 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
   });
   tool('create_database', 'Create a database with named, typed properties.', { workspace_id: identifier, title, properties: z.array(propertySchema), parent_id: identifier.optional() }, true, input => {
     if (new Set(input.properties.map(p => p.name)).size !== input.properties.length) fail(400, 'Property names must be unique.');
-    return describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, kind: 'database', parentId: input.parent_id, schema: input.properties.map(newProperty) }));
+    const draft = {workspaceId:input.workspace_id,schema:input.properties.map(p=>newProperty({...p,rollup:undefined}))} as Page;
+    draft.schema=input.properties.map(p=>{const property=newProperty(p,draft,pages,actor);property.id=draft.schema.find(s=>s.name===p.name)!.id;return property;});
+    return describePage(pages, actor, pages.create(actor, input.workspace_id, { title: input.title, kind: 'database', parentId: input.parent_id, schema: draft.schema }));
   });
   tool('update_database', 'Change a database title, add properties, rename properties or add options.', {
     database_id: identifier, title: title.optional(), add_properties: z.array(propertySchema).optional(),
@@ -143,7 +167,7 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
     add_options: z.record(z.string(), z.array(optionSchema)).optional()
   }, true, input => {
     const database = databasePage(pages, actor, input.database_id, true);
-    for (const property of input.add_properties ?? []) { if (database.schema.some(p => p.name === property.name)) fail(400, `Property "${property.name}" already exists.`); database.schema.push(newProperty(property)); }
+    for (const property of input.add_properties ?? []) { if (database.schema.some(p => p.name === property.name)) fail(400, `Property "${property.name}" already exists.`); database.schema.push(newProperty(property,database,pages,actor)); }
     const renames = Array.isArray(input.rename_properties) ? input.rename_properties.map(p => [p.name, p.new_name]) : Object.entries(input.rename_properties ?? {});
     for (const [oldName, newName] of renames) namedProperty(database, oldName).name = newName;
     if (new Set(database.schema.map(p => p.name)).size !== database.schema.length) fail(400, 'Property names must be unique.');
@@ -174,20 +198,29 @@ function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: t
       return { propertyId, op: filter.op, ...(value !== undefined ? { value } : {}) };
     }) : view?.filters ?? [];
     const sorts: Sort[] = input.sorts ? input.sorts.map(sort => ({ propertyId: key(sort.property ?? sort.propertyId!), dir: sort.dir })) : view?.sorts ?? [];
-    const rows=applyView(pages.rows(actor, database.id), { filters, sorts }, database.schema);
+    const rows=applyView(pages.rows(actor, database.id), { filters, sorts }, database.schema, {userId:actor.user.id,today:pages.today(actor)});
     return {total:rows.length,rows:rows.slice(input.offset??0,(input.offset??0)+(input.limit??100)).map(row => ({...row,properties:namedProps(database,row.props),props:undefined}))};
   });
-  tool('create_row', 'Create a database row using property names; new option names are added automatically.', { database_id: identifier, title, properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
+  tool('create_row', 'Create a database row using property names; new option names are added automatically.', { database_id: identifier, title, properties: valuesSchema.optional(), markdown: text.optional(), template:identifier.optional() }, true, input => {
     const database = databasePage(pages, actor, input.database_id, true);
     const props = convertProperties(pages, actor, database, input.properties ?? {});
-    return describePage(pages, actor, pages.create(actor, database.workspaceId, { kind: 'row', parentId: database.id, title: input.title, props, content: input.markdown === undefined ? null : markdownToDoc(input.markdown) }));
+    return describePage(pages, actor, pages.create(actor, database.workspaceId, { kind: 'row', parentId: database.id, templateId: templateId(input.template,database.workspaceId,database.id), title: input.title, props, ...(input.markdown === undefined ? {} : {content: markdownToDoc(input.markdown)}) }));
   });
-  tool('update_row', 'Update a row title, named properties or Markdown body.', { row_id: identifier, title: title.optional(), properties: valuesSchema.optional(), markdown: text.optional() }, true, input => {
+  tool('update_row', 'Update a row title, named properties or Markdown body.', { row_id: identifier, title: title.optional(), properties: valuesSchema.optional(), markdown: text.optional(), repeat:z.object({date_property:identifier,every:z.number().int().min(1).max(365),unit:z.enum(['day','week','month','year']),weekdays:z.array(z.number().int().min(0).max(6)).optional(),from:z.enum(['due','completed']).optional(),until:text.nullable().optional(),done_property:identifier,done_value:z.union([text,z.boolean()]),reset_value:z.union([text,z.boolean(),z.null()])}).nullable().optional(),reminders:z.array(z.object({date_property:identifier.optional(),minutes_before:z.number().int().min(0).optional(),at:text.optional(),people:z.array(text).optional()})).nullable().optional() }, true, input => {
     const row = pages.get(actor, input.row_id, true);
     if (row.kind !== 'row' || !row.parentId) fail(400, 'The requested page is not a database row.');
     const database = databasePage(pages, actor, row.parentId!, true);
     const props = input.properties ? convertProperties(pages, actor, database, input.properties) : undefined;
-    return describePage(pages, actor, pages.patch(actor, row.id, { ...(props ? { props } : {}), ...(input.title !== undefined ? { title: input.title } : {}), ...(input.markdown !== undefined ? { content: markdownToDoc(input.markdown) } : {}) }));
+    const extra: any = {};
+    if(input.repeat!==undefined){
+      if(input.repeat===null)extra.repeat=null;
+      else {const r=input.repeat,done=namedProperty(database,r.done_property);const option=(value:string|boolean|null)=>typeof value==='string'&&done.options?(done.options.find(o=>o.id===value||o.name===value)?.id??fail(400,'Unknown completion option.')):value;
+        extra.repeat={dateProp:namedProperty(database,r.date_property).id,every:r.every,unit:r.unit,...(r.weekdays?{weekdays:r.weekdays}:{}),from:r.from??'due',until:r.until??null,doneProp:done.id,doneValue:option(r.done_value),resetValue:option(r.reset_value)};
+      }
+    }
+    if(input.reminders!==undefined)extra.reminders=input.reminders===null?[]:input.reminders.map(r=>({id:id(),dateProp:r.date_property?namedProperty(database,r.date_property).id:null,offsetMinutes:r.minutes_before??0,at:r.at??null,userIds:(r.people??[]).map(person=>{const members=pages.s.db.prepare('SELECT userId FROM memberships WHERE workspaceId=?').all(row.workspaceId);const found=members.map(m=>pages.s.get('users',String(m.userId))).filter(u=>u&&(u.id===person||u.name===person||u.email===person));if(found.length!==1)fail(400,'Unknown or ambiguous reminder recipient.');return found[0]!.id;}),personProp:null,createdBy:actor.user.id,lastFiredFor:null}));
+
+    return describePage(pages, actor, pages.patch(actor, row.id, { ...extra, ...(props ? { props } : {}), ...(input.title !== undefined ? { title: input.title } : {}), ...(input.markdown !== undefined ? { content: markdownToDoc(input.markdown) } : {}) }));
   });
   tool('recent_activity', 'Read recent visible activity in a workspace.', { workspace_id: identifier, limit: limitSchema }, false, input => { membership(pages.s, actor, input.workspace_id); return pages.activity(actor, input.workspace_id, input.limit ?? 50); });
   const dashboard=new Dashboard(pages);

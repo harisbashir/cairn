@@ -6,7 +6,7 @@ import type { Pages } from './pages.ts';
 import type { HomeLayout, Sticky, Widget } from '../../shared/types.ts';
 
 export const widgetsSchema = z.array(z.object({
-  id: z.string().min(1), type: z.enum(['welcome','recent','favorites','activity','stickies','view','page','note','links','calendar','stats']),
+  id: z.string().min(1), type: z.enum(['welcome','recent','favorites','activity','stickies','view','page','note','links','calendar','stats','notifications','changes']),
   title: z.string().max(1000).optional(), size: z.enum(['third','half','two-thirds','full']),
   config: z.record(z.string(), z.unknown()).refine(v => Buffer.byteLength(JSON.stringify(v)) <= 20480, 'Widget config exceeds 20 KB.'),
 })).max(30).refine(v => new Set(v.map(w => w.id)).size === v.length, 'Widget ids must be unique.');
@@ -72,5 +72,5 @@ export function registerDashboard(app: Hono<Env>, pages: Pages) {
   app.post('/api/workspaces/:wid/stickies', async c => c.json(d.add(c.get('actor'),c.req.param('wid'),await body(c,stickyInput))));
   app.patch('/api/stickies/:id', async c => c.json(d.update(c.get('actor'),c.req.param('id'),await body(c,stickyInput))));
   app.delete('/api/stickies/:id', c => c.json(d.remove(c.get('actor'),c.req.param('id'))));
-  app.get('/api/workspaces/:wid/stats', c => { const a=c.get('actor'),wid=c.req.param('wid'), ps=pages.list(a,wid), visible=new Set(pages.list(a,wid,true).map(p=>p.id)), cutoff=new Date(Date.now()-7*86400000).toISOString(), acts=pages.s.all('activity').filter(x=>x.workspaceId===wid && x.at>cutoff && (!x.pageId || visible.has(x.pageId))); return c.json({ pages:ps.filter(x=>x.kind==='page').length, databases:ps.filter(x=>x.kind==='database').length, rows:ps.filter(x=>x.kind==='row').length, members:Number(pages.s.db.prepare('SELECT count(*) n FROM memberships WHERE workspaceId=?').get(wid)!.n), editsThisWeek:acts.length, aiEditsThisWeek:acts.filter(x=>x.actorType==='ai').length }); });
+  app.get('/api/workspaces/:wid/stats', c => { const a=c.get('actor'),wid=c.req.param('wid'), ps=pages.list(a,wid).filter(p=>!pages.isTemplate(p)), visible=new Set(pages.list(a,wid,true).map(p=>p.id)), cutoff=new Date(Date.now()-7*86400000).toISOString(), acts=pages.s.all('activity').filter(x=>x.workspaceId===wid && x.at>cutoff && (!x.pageId || visible.has(x.pageId))); return c.json({ pages:ps.filter(x=>x.kind==='page').length, databases:ps.filter(x=>x.kind==='database').length, rows:ps.filter(x=>x.kind==='row').length, members:Number(pages.s.db.prepare('SELECT count(*) n FROM memberships WHERE workspaceId=?').get(wid)!.n), editsThisWeek:acts.length, aiEditsThisWeek:acts.filter(x=>x.actorType==='ai').length }); });
 }

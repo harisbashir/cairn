@@ -15,13 +15,13 @@ const access = choice('read','write');
 const visibility = choice('private','workspace');
 const actorType = choice('user','ai');
 const pageKind = choice('page','database','row');
-const widgetTypes = choice('welcome','recent','favorites','activity','stickies','view','page','note','links','calendar','stats');
+const widgetTypes = choice('welcome','recent','favorites','activity','stickies','view','page','note','links','calendar','stats','notifications','changes');
 const optionColor = choice('gray','brown','orange','yellow','green','teal','blue','purple','pink','red');
 const props: Schema = record({ anyOf: [str,num,bool,array(str),{type:'null'}] });
 const identity = {id:str,title:str,icon:str};
 const jobResult = object({pageIds:array(str),url:str},[]);
 export const schemas: Record<string, Schema> = {
-  UserPrefs: object({theme:choice('system','light','dark'),accent:choice('blue','violet','green','orange','pink','graphite')}),
+  UserPrefs: object({theme:choice('system','light','dark'),accent:choice('blue','violet','green','orange','pink','graphite'),timezone:str,reminderHour:{type:'integer',minimum:0,maximum:23},notify:ref('NotifyPrefs'),capture:nullable(ref('CaptureTarget'))}),
   User: object({id:str,email:{type:'string',format:'email'},name:str,color:str,isAdmin:bool,disabled:bool,createdAt:timestamp,lastSeenAt:nullable(timestamp),prefs:ref('UserPrefs')}),
   WorkspaceSummary: object({id:str,name:str,icon:str,color:str,role}),
   InstanceInfo: object({name:str,allowSignup:bool,needsSetup:bool,version:str}),
@@ -31,12 +31,12 @@ export const schemas: Record<string, Schema> = {
   Invite: object({id:str,token:str,email:nullable(str),role,createdAt:timestamp,expiresAt:timestamp,acceptedAt:nullable(timestamp)}),
   InviteInfo: object({workspaceName:str,workspaceIcon:str,inviterName:str,role,email:nullable(str)}),
   DocNode: object({type:str,attrs:record(),content:array(ref('DocNode')),marks:array(object({type:str,attrs:record()},['type'])),text:str},['type']),
-  Property: object({id:str,name:str,type:choice('text','number','select','multi_select','status','date','checkbox','url','person','relation'),options:array(object({id:str,name:str,color:optionColor})),relationDatabaseId:str},['id','name','type']),
+  Property: object({id:str,name:str,type:choice('text','number','select','multi_select','status','date','checkbox','url','person','relation','files','rollup','formula'),rollup:ref('RollupConfig'),formula:ref('FormulaConfig'),numberFormat:choice('plain','comma','percent','currency'),options:array(object({id:str,name:str,color:optionColor})),relationDatabaseId:str},['id','name','type']),
   Filter: object({propertyId:str,op:choice('contains','not_contains','eq','neq','gt','lt','gte','lte','is_empty','is_not_empty','checked','unchecked'),value:{anyOf:[str,num,bool,array(str),{type:'null'}]}},['propertyId','op']),
   Sort: object({propertyId:str,dir:choice('asc','desc')}),
   ChartConfig: object({kind:choice('bar','donut','line'),groupBy:str,measure:choice('count','sum','avg'),valueProp:str},['kind','groupBy','measure']),
   View: object({id:str,name:str,type:choice('table','board','list','gallery','calendar','timeline','chart','feed'),filters:array(ref('Filter')),sorts:array(ref('Sort')),groupBy:str,hidden:array(str),widths:record(num),cardProps:array(str),columnOrder:array(str),hiddenColumns:array(str),dateProp:str,endDateProp:str,zoom:choice('week','month','quarter'),cover:choice('page','none'),chart:ref('ChartConfig'),phone:choice('auto','same')},['id','name','type','filters','sorts']),
-  Page: object({...identity,workspaceId:str,parentId:nullable(str),kind:pageKind,cover:str,visibility,content:nullable(ref('DocNode')),props,schema:array(ref('Property')),views:array(ref('View')),position:num,createdBy:str,updatedBy:str,updatedByType:actorType,createdAt:timestamp,updatedAt:timestamp,deletedAt:nullable(timestamp),breadcrumbs:array(object({...identity,kind:pageKind})),favorite:bool,shareToken:nullable(str),canEdit:bool,parentSchema:array(ref('Property'))},['id','workspaceId','parentId','kind','title','icon','cover','visibility','content','props','schema','views','position','createdBy','updatedBy','updatedByType','createdAt','updatedAt','deletedAt']),
+  Page: object({...identity,workspaceId:str,parentId:nullable(str),kind:pageKind,cover:str,visibility,content:nullable(ref('DocNode')),props,schema:array(ref('Property')),views:array(ref('View')),position:num,createdBy:str,updatedBy:str,updatedByType:actorType,createdAt:timestamp,updatedAt:timestamp,deletedAt:nullable(timestamp),breadcrumbs:array(object({...identity,kind:pageKind})),favorite:bool,shareToken:nullable(str),canEdit:bool,parentSchema:array(ref('Property')),commentCount:num,repeat:nullable(ref('Repeat')),reminders:array(ref('Reminder')),isTemplate:bool,defaultTemplateId:nullable(str)},['id','workspaceId','parentId','kind','title','icon','cover','visibility','content','props','schema','views','position','createdBy','updatedBy','updatedByType','createdAt','updatedAt','deletedAt','repeat','reminders','isTemplate','defaultTemplateId']),
   Row: object({...identity,props,position:num,hasContent:bool,cover:str,preview:str,createdBy:str,createdByName:str,updatedByType:actorType,createdAt:timestamp,updatedAt:timestamp}),
   TreeNode: object({...identity,parentId:nullable(str),kind:choice('page','database'),position:num,visibility,createdBy:str}),
   Tree: object({nodes:array(ref('TreeNode')),favorites:array(str)}),
@@ -44,7 +44,7 @@ export const schemas: Record<string, Schema> = {
   RecentPage: object({...identity,kind:pageKind,path:str,updatedAt:timestamp,updatedByName:str,updatedByType:actorType}),
   TrashItem: object({...identity,kind:pageKind,deletedAt:timestamp,deletedByName:str}),
   PageVersion: object({id:str,title:str,createdAt:timestamp,createdByName:str,createdByType:actorType}),
-  Activity: object({id:str,at:timestamp,actorName:str,actorType,action:choice('created','updated','deleted','restored','moved','shared','joined'),pageId:nullable(str),pageTitle:str,pageIcon:str}),
+  Activity: object({id:str,at:timestamp,actorName:str,actorType,action:choice('created','updated','deleted','restored','moved','shared','joined','repeated','undone'),clientName:nullable(str),pageId:nullable(str),pageTitle:str,pageIcon:str}),
   ApiToken: object({id:str,name:str,prefix:str,access,workspaceId:nullable(str),createdAt:timestamp,lastUsedAt:nullable(timestamp)}),
   AdminOverview: object(Object.fromEntries(['users','workspaces','pages','databases','rows','aiEdits7d','storageBytes'].map(k=>[k,num]))),
   AdminWorkspace: object({id:str,name:str,icon:str,color:str,members:num,pages:num,ownerName:str,createdAt:timestamp}),
@@ -66,14 +66,55 @@ export const schemas: Record<string, Schema> = {
   File: object({id:str,name:str,url:str,mime:str,size:num,createdAt:timestamp,createdByName:str}),
   Ok: object({ok:bool}), Health: object({ok:bool,version:str}),
   ApiError: object({error:object({code:str,message:str})}),
-  LiveEvent: {oneOf:[object({type:choice('page'),pageId:str,parentId:nullable(str),change:choice('created','updated','deleted','restored','moved'),actorId:str,actorType,clientId:nullable(str)}),object({type:choice('members','home','stickies','ping')})]},
+  LiveEvent: {oneOf:[object({type:choice('page'),pageId:str,parentId:nullable(str),change:choice('created','updated','deleted','restored','moved'),actorId:str,actorType,clientId:nullable(str)}),object({type:choice('members','home','stickies','notifications','ping')}),object({type:choice('comments'),pageId:str})]},
   OAuthRegistration: object({client_name:str,redirect_uris:array(str),token_endpoint_auth_method:choice('none')},['redirect_uris']),
   OAuthClient: object({client_id:str,client_name:str,redirect_uris:array(str),token_endpoint_auth_method:choice('none'),grant_types:array(str),response_types:array(str)}),
   OAuthTokenRequest: object({grant_type:choice('authorization_code','refresh_token'),client_id:str,code:str,redirect_uri:str,code_verifier:str,refresh_token:str},['grant_type','client_id']),
   OAuthTokens: object({access_token:str,token_type:choice('Bearer'),expires_in:num,refresh_token:str,scope:access}),
-  PageInput: object({title:str,icon:str,cover:str,content:nullable(ref('DocNode')),props,schema:array(ref('Property')),views:array(ref('View')),visibility,parentId:nullable(str),kind:pageKind,afterId:nullable(str)},[]),
+  PageInput: object({title:str,icon:str,cover:str,content:nullable(ref('DocNode')),props,schema:array(ref('Property')),views:array(ref('View')),visibility,parentId:nullable(str),kind:pageKind,afterId:nullable(str),repeat:nullable(ref('Repeat')),reminders:{...array(ref('ReminderInput')),maxItems:10},isTemplate:bool,templateId:nullable(str),defaultTemplateId:nullable(str)},[]),
 };
+// v0.3 schemas are shared by REST responses and page create/patch inputs.
+Object.assign(schemas, {
+  NotifyPrefs: object({push:bool,email:bool,mentions:bool,comments:bool,assigned:bool}),
+  CaptureTarget: object({workspaceId:str,databaseId:nullable(str)}),
+  Repeat: object({dateProp:str,every:{type:'integer',minimum:1,maximum:365},unit:choice('day','week','month','year'),weekdays:array({type:'integer',minimum:0,maximum:6}),from:choice('due','completed'),until:nullable({type:'string',format:'date'}),doneProp:str,doneValue:{anyOf:[str,bool]},resetValue:{anyOf:[str,bool,{type:'null'}]}},['dateProp','every','unit','from','until','doneProp','doneValue','resetValue']),
+  Reminder: object({id:str,dateProp:nullable(str),offsetMinutes:{type:'integer',minimum:0},at:nullable(timestamp),userIds:array(str),personProp:nullable(str),createdBy:str,lastFiredFor:nullable(str)}),
+  ReminderInput: object({id:str,dateProp:nullable(str),offsetMinutes:{type:'integer',minimum:0},at:nullable(timestamp),userIds:array(str),personProp:nullable(str)},[]),
+  Notification: object({id:str,at:timestamp,kind:choice('reminder','mention','comment','assigned','repeat'),title:str,body:str,pageId:nullable(str),workspaceId:str,actorName:str,read:bool}),
+  PushSubscriptionInfo: object({id:str,device:str,createdAt:timestamp}),
+  PushSubscriptionInput: object({subscription:object({endpoint:{type:'string',format:'uri'},expirationTime:nullable(num),keys:object({p256dh:str,auth:str})},['endpoint','keys']),device:str},['subscription']),
+  MailSettings: object({enabled:bool,host:str,port:{type:'integer',minimum:1,maximum:65535},secure:bool,username:str,password:{type:'string',description:"Always empty on reads; use hasPassword to check whether a password is configured."},hasPassword:bool,from:str}),
+  TemplateSummary: object({...identity,kind:choice('page','row'),databaseId:nullable(str),databaseTitle:str,isDefault:bool,updatedAt:timestamp}),
+  Backlink: object({...identity,kind:pageKind,path:str,snippet:str,via:choice('link','mention','relation')}),
+  Comment: object({id:str,pageId:str,threadId:str,quote:str,body:str,resolved:bool,createdBy:str,createdByName:str,createdByType:actorType,createdAt:timestamp,updatedAt:timestamp}),
+  RollupConfig: object({source:{oneOf:[object({kind:choice('relation'),propertyId:str}),object({kind:choice('incoming'),databaseId:str,propertyId:str})]},target:str,fn:choice('count','count_values','sum','avg','min','max','earliest','latest','percent_checked','show'),filters:array(ref('Filter'))},['source','target','fn']),
+  FormulaConfig: object({expression:{type:'string',maxLength:2000},resultType:choice('text','number','checkbox','date')},['expression']),
+  UpcomingReminder: object({pageId:str,title:str,icon:str,fireAt:timestamp,occurrence:str}),
+  Mentionables: object({pages:array(object({...identity,path:str})),people:array(object({id:str,name:str,color:str}))}),
+});
+const changeProperties = {id:str,at:timestamp,actorName:str,actorType,clientName:nullable(str),action:choice('created','updated','deleted','restored','moved','shared','joined','repeated','undone'),pageId:str,pageTitle:str,pageIcon:str,pageKind,databaseTitle:str,fields:array(str),canUndo:bool,undoneAt:nullable(timestamp),undoneByName:nullable(str)};
+schemas.ChangeSummary = object(changeProperties);
+schemas.ChangeDetail = object({...changeProperties,diffs:array(object({field:str,before:str,after:str})),conflict:bool});
 function responseSchema(path:string,method:string):Schema {
+  if (method !== 'DELETE') {
+    if(path.endsWith('/notifications/count'))return object({unread:num});
+    if(path.endsWith('/notifications'))return array(ref('Notification'));
+    if(path.endsWith('/push/key'))return object({publicKey:str});
+    if(path.endsWith('/push/subscriptions'))return method==='GET'?array(ref('PushSubscriptionInfo')):ref('PushSubscriptionInfo');
+    if(path.endsWith('/push/test')||path.endsWith('/mail/test'))return object({ok:bool,message:str});
+    if(path.endsWith('/admin/mail'))return ref('MailSettings');
+    if(path.endsWith('/reminders'))return array(ref('UpcomingReminder'));
+    if(path.endsWith('/templates'))return array(ref('TemplateSummary'));
+    if(path.endsWith('/backlinks'))return array(ref('Backlink'));
+    if(path.endsWith('/mentionables'))return ref('Mentionables');
+    if(path.endsWith('/comments'))return method==='GET'?array(ref('Comment')):ref('Comment');
+    if(path.includes('/comments/'))return ref('Comment');
+    if(path.endsWith('/changes/undo'))return object({undone:array(str),conflicts:array(str),failed:array(str)});
+    if(path.endsWith('/undo'))return ref('ChangeSummary');
+    if(path.endsWith('/changes'))return array(ref('ChangeSummary'));
+    if(path.includes('/changes/'))return ref('ChangeDetail');
+    if(path.endsWith('/capture'))return object({page:ref('Page')});
+  }
   if(path.endsWith('/home'))return ref('HomeLayout');
   if(path.endsWith('/events'))return ref('LiveEvent');
   if(method==='DELETE'||path.endsWith('/logout'))return ref('Ok');
@@ -116,9 +157,19 @@ function responseSchema(path:string,method:string):Schema {
   return ref('Ok');
 }
 function inputSchema(path:string,method:string):Schema {
+  if(path.endsWith('/notifications/read'))return object({ids:array(str)},[]);
+  if(path.endsWith('/push/subscriptions'))return ref('PushSubscriptionInput');
+  if(path.endsWith('/admin/mail'))return object({enabled:bool,host:str,port:{type:'integer',minimum:1,maximum:65535},secure:bool,username:str,password:{type:'string',writeOnly:true},from:str,hasPassword:bool},['enabled','host','port','secure','username','from']);
+  if(path.endsWith('/mail/test'))return object({to:{type:'string',format:'email'}},[]);
+  if(path.endsWith('/save-as-template'))return object({title:str},[]);
+  if(path.endsWith('/comments'))return object({body:{type:'string',minLength:1,maxLength:5000},quote:str,threadId:str},['body']);
+  if(path.includes('/comments/'))return object({body:{type:'string',minLength:1,maxLength:5000},resolved:bool},[]);
+  if(path.endsWith('/changes/undo'))return object({ids:array(str),force:bool},['ids']);
+  if(path.endsWith('/undo'))return object({force:bool},[]);
+  if(path.endsWith('/capture'))return object({title:str,text:str,url:{type:'string',format:'uri'},workspaceId:str,databaseId:nullable(str)},[]);
   if(path.endsWith('/signup'))return object({email:str,name:str,password:{type:'string',minLength:8},inviteToken:str,token:bool},['email','name','password']);
   if(path.endsWith('/login'))return object({email:str,password:str,token:bool},['email','password']);
-  if(path.endsWith('/me'))return object({name:str,color:str,currentPassword:str,newPassword:str,prefs:object({theme:choice('system','light','dark'),accent:choice('blue','violet','green','orange','pink','graphite')},[])},[]);
+  if(path.endsWith('/me'))return object({name:str,color:str,currentPassword:str,newPassword:str,prefs:object({theme:choice('system','light','dark'),accent:choice('blue','violet','green','orange','pink','graphite'),timezone:str,reminderHour:{type:'integer',minimum:0,maximum:23},notify:object({push:bool,email:bool,mentions:bool,comments:bool,assigned:bool},[]),capture:nullable(ref('CaptureTarget'))},[])},[]);
   if(path.includes('/notion/'))return object({token:str,sourceIds:array(str),parentId:str,pageId:str,notionParentPageId:str},path.endsWith('/sources')?['token']:path.endsWith('/import')?['token','sourceIds']:['token','pageId','notionParentPageId']);
   if(path.endsWith('/home'))return object({widgets:{...array(ref('Widget')),maxItems:30}});
   if(path.includes('/stickies'))return object({text:{type:'string',maxLength:2000},color:choice('yellow','pink','blue','green','purple','orange','gray'),visibility,afterId:nullable(str)},[]);
@@ -149,6 +200,14 @@ export function openapi(app:Hono<Env>) {
     if(r.path.endsWith('/export')&&r.path.includes('/pages/'))parameters.push({name:'format',in:'query',schema:choice('md','csv','json')});
     if(r.path.endsWith('/search'))parameters.push({name:'q',in:'query',required:true,schema:str});
     if(/\/(search|recent|activity)$/.test(r.path))parameters.push({name:'limit',in:'query',schema:{type:'integer',maximum:200}});
+    if(r.method==='GET'&&r.path.endsWith('/notifications')) {
+      parameters.push({name:'unread',in:'query',schema:choice('1')},{name:'limit',in:'query',schema:{type:'integer',default:50,minimum:1,maximum:200}},{name:'before',in:'query',schema:timestamp});
+    }
+    if(r.method==='GET'&&r.path.endsWith('/changes')) {
+      parameters.push({name:'actor',in:'query',schema:{...choice('ai','user','all'),default:'ai'}},{name:'client',in:'query',schema:str},{name:'before',in:'query',schema:timestamp},{name:'limit',in:'query',schema:{type:'integer',default:50,minimum:1,maximum:200}});
+    }
+    if(r.method==='GET'&&r.path.endsWith('/reminders'))parameters.push({name:'days',in:'query',schema:{type:'integer',default:14,minimum:1,maximum:365}});
+    if(r.method==='GET'&&r.path.endsWith('/mentionables'))parameters.push({name:'q',in:'query',schema:str});
     if(r.method==='DELETE'&&/\/pages\/:id$/.test(r.path))parameters.push({name:'permanent',in:'query',schema:choice('1')});
     const multipart=r.method==='POST'&&(r.path.endsWith('/import')&&!r.path.includes('/notion/')||r.path.endsWith('/files'));
     const contentType=multipart?'multipart/form-data':'application/json';

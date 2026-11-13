@@ -37,7 +37,7 @@ export class Calendars {
   }
   rowEvents(actor: Actor,wid: string,from?: string,to?: string): CalendarEvent[] {
     const pages=this.pages.list(actor,wid); const databases=new Map(pages.filter(p=>p.kind==='database').map(p=>[p.id,p]));
-    return pages.filter(p=>p.kind==='row').flatMap(row=>{
+    return pages.filter(p=>p.kind==='row'&&!this.pages.isTemplate(p)).flatMap(row=>{
       const database=databases.get(row.parentId??''); if(!database) return [];
       return database.schema.filter(p=>p.type==='date').flatMap(property=>{
         const start=row.props[property.id]; if(typeof start!=='string' || !start || !Number.isFinite(Date.parse(start))) return [];

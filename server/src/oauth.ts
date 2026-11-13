@@ -15,7 +15,7 @@ export function oauthActor(s: Store, authorization?: string): Actor | undefined 
   const user = s.get('users',grant.userId);
   if (!user || user.disabled) return;
   grant.lastUsedAt=now(); s.put('oauthGrants',grant);
-  return {user:publicUser(user),actorType:'user',clientId:null,access:grant.access,workspaceId:grant.workspaceId};
+  return {user:publicUser(user),actorType:'user',clientId:null,clientName:s.get('oauthClients',grant.clientId)?.client_name ?? null,access:grant.access,workspaceId:grant.workspaceId};
 }
 function redirectAllowed(value: string) {
   try { const u = new URL(value); return !u.hash && !u.username && !u.password && (u.protocol==='https:' || (u.protocol==='http:' && ['localhost','127.0.0.1','[::1]'].includes(u.hostname)) || (!['http:','https:','javascript:','data:','file:','ftp:'].includes(u.protocol) && /^[a-z][a-z0-9+.-]+:$/.test(u.protocol))); } catch { return false; }

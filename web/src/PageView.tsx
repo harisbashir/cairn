@@ -1,4 +1,4 @@
-import { Copy, Globe, History, Share as ShareIcon, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2 } from 'lucide-react';
+import { Copy, Globe, Printer, History, Share as ShareIcon, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { DocNode, Page, Props } from '../../shared/types.ts';
@@ -139,6 +139,7 @@ function PageView({ page }: { page: Page }) {
         <Popover placement="bottom-end" trigger={(p) => <button className="icon-btn" aria-label="Page actions" {...p}><MoreHorizontal size={17} /></button>}>
           <MenuItem icon={<Link2 size={16} />} onClick={() => { navigator.clipboard.writeText(location.href); ui.toast('Link copied'); }}>Copy Link</MenuItem>
           <MenuItem icon={<History size={16} />} onClick={() => setHistory(true)}>Version History</MenuItem>
+          <MenuItem icon={<Printer size={16} />} onClick={() => setTimeout(() => window.print(), 50)}>Print or Save as PDF</MenuItem>
           {canEdit && <MenuItem icon={<Copy size={16} />} onClick={async () => { await post(`/api/pages/${page.id}/duplicate`); invalidateWorkspace(s.wid); qc.invalidateQueries({ queryKey: ['rows', page.parentId] }); ui.toast('Duplicated'); }}>Duplicate</MenuItem>}
           {canEdit && <><div className="menu-sep" /><MenuItem danger icon={<Trash2 size={16} />} onClick={() => s.trashPage(page.id, title)}>Move to Trash</MenuItem></>}
         </Popover>

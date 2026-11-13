@@ -47,7 +47,7 @@ describe('review regression checks',()=>{
   const oldUser={...actor.user} as Record<string,unknown>;delete oldUser.prefs;s.put('users',oldUser as {id:string});
   const oldPage={...row} as Record<string,unknown>;delete oldPage.cover;delete oldPage.updatedByType;s.put('pages',oldPage as {id:string});
   s.db.prepare('UPDATE search SET body=? WHERE id=?').run('rawsecretoption',row.id);s.db.exec('PRAGMA user_version=1');s.close();s=new Store(dir);
-  expect(s.get('users','owner')?.prefs).toEqual({theme:'system',accent:'blue'});expect(s.get('pages',row.id)).toMatchObject({cover:'',updatedByType:'user'});expect(s.db.prepare('PRAGMA user_version').get()!.user_version).toBe(2);
+  expect(s.get('users','owner')?.prefs).toEqual({theme:'system',accent:'blue',timezone:'UTC',reminderHour:9,capture:null,notify:{push:true,email:false,mentions:true,comments:true,assigned:true}});expect(s.get('pages',row.id)).toMatchObject({cover:'',updatedByType:'user'});expect(s.db.prepare('PRAGMA user_version').get()!.user_version).toBe(3);
   expect(s.db.prepare("SELECT id FROM search WHERE search MATCH 'rawsecretoption'").all()).toEqual([]);expect(s.db.prepare("SELECT id FROM search WHERE search MATCH 'Finished'").all()).toEqual([{id:row.id}]);
  });
  it('rejects invalid PKCE and one-time code replay',async()=>{

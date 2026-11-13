@@ -68,7 +68,7 @@ export function newUser(s:Store,input:{
 }) {
   if(s.all('users').some(u=>u.email===input.email)) fail(409,'An account with this email already exists.');
   const u={
-    prefs:{theme:'system' as const,accent:'blue' as const},id:id(),email:input.email,name:input.name,color:'#6366f1',isAdmin:input.isAdmin??false,disabled:false,createdAt:now(),lastSeenAt:null,...passwordFields(input.password)
+    prefs:{theme:'system' as const,accent:'blue' as const,timezone:'UTC',reminderHour:9,notify:{push:true,email:false,mentions:true,comments:true,assigned:true},capture:null},id:id(),email:input.email,name:input.name,color:'#6366f1',isAdmin:input.isAdmin??false,disabled:false,createdAt:now(),lastSeenAt:null,...passwordFields(input.password)
   };
   s.put('users',u);
   return u;

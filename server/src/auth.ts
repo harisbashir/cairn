@@ -48,5 +48,5 @@ export function tokenActor(s: Store, authorization: string | undefined): Actor |
   if (!user || user.disabled) return;
   token.lastUsedAt = now();
   s.put('tokens', token);
-  return { user:publicUser(user), actorType:'user', clientId:null, access:token.access, workspaceId:token.workspaceId };
+  return { user:publicUser(user), actorType:'user', clientId:null, access:token.access, workspaceId:token.workspaceId, clientName:token.name };
 }

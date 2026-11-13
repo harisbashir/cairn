@@ -1,3 +1,4 @@
+import { publicComputed, publicRows } from './public-pages.ts';
 import type { Hono } from 'hono';
 import { z } from 'zod';
 import type { Page, User } from '../../shared/types.ts';
@@ -13,7 +14,7 @@ function limit(value: string | undefined, fallback = 50): number {
 export function registerPages(app: Hono<Env>, pages: Pages): void {
   app.get('/api/workspaces/:wid/tree', c => {
     const actor = c.get('actor');
-    const visible = pages.list(actor, c.req.param('wid')).filter(page => page.kind !== 'row');
+    const visible = pages.list(actor, c.req.param('wid')).filter(page => page.kind !== 'row' && !pages.isTemplate(page));
     const favorites = visible.filter(page => page.favoriteUsers?.includes(actor.user.id))
       .sort((a, b) => (a.favoriteOrder?.[actor.user.id] ?? 0) - (b.favoriteOrder?.[actor.user.id] ?? 0));
     return c.json({
@@ -35,7 +36,8 @@ export function registerPages(app: Hono<Env>, pages: Pages): void {
     const page = pages.get(actor, c.req.param('id'));
     const member = membership(pages.s, actor, page.workspaceId);
     return c.json({
-      ...clean(page),
+      ...clean(pages.computed(actor,page)),
+      commentCount:pages.comments(actor,page.id).filter(c=>c.threadId===c.id&&!c.resolved).length,
       breadcrumbs: pages.ancestors(page).map(ancestor => ({
         id: ancestor.id, title: ancestor.title, icon: ancestor.icon, kind: ancestor.kind,
       })),
@@ -125,10 +127,8 @@ export function registerPages(app: Hono<Env>, pages: Pages): void {
   app.get('/api/public/:token', c => {
     const page = publicPage(pages, c.req.param('token'));
     c.header('Link', `<${publicUrl(c, '/s/' + c.req.param('token'))}>; rel="canonical"`);
-    const rows = page.kind === 'database' ? pages.s.all<Page>('pages')
-      .filter(row => row.parentId === page.id && row.kind === 'row' && !row.deletedAt && row.visibility !== 'private')
-      .sort((a, b) => a.position - b.position).map(row => pages.row(row)) : [];
-    return c.json({ page: clean(page), rows });
+    const rows = page.kind === 'database' ? publicRows(pages,page) : [];
+    return c.json({ page: clean(publicComputed(pages,page)), rows });
   });
 
   app.get('/api/workspaces/:wid/trash', c => {
@@ -142,7 +142,7 @@ export function registerPages(app: Hono<Env>, pages: Pages): void {
   app.get('/api/workspaces/:wid/search', c => c.json(pages.search(
     c.get('actor'), c.req.param('wid'), c.req.query('q') ?? '', limit(c.req.query('limit'), 30))));
   app.get('/api/workspaces/:wid/recent', c => {
-    const recent = pages.list(c.get('actor'), c.req.param('wid'))
+    const recent = pages.list(c.get('actor'), c.req.param('wid')).filter(p=>!pages.isTemplate(p))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit(c.req.query('limit')));
     return c.json(recent.map(page => ({
       id: page.id, kind: page.kind, title: page.title, icon: page.icon, path: pages.path(page),

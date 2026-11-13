@@ -15,9 +15,11 @@ import { registerCalendars } from './calendars.ts';
 import { registerTransfer } from './transfer.ts';
 import { registerBackups } from './backups.ts';
 import { startHousekeeping } from './housekeeping.ts';
+import { registerCollaboration } from './collaboration.ts';
+import { Notifications, registerNotifications, type NotificationOptions } from './notifications.ts';
 import { openapi } from './openapi.ts';
 
-export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch }: { dataDir: string; fetch?: typeof globalThis.fetch }) {
+export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch, notifications: notificationOptions }: { dataDir: string; fetch?: typeof globalThis.fetch; notifications?: NotificationOptions }) {
   const app = new Hono<Env>();
   const store = new Store(dataDir);
   const events = new Events();
@@ -26,7 +28,7 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch }: { da
     c.header('X-Content-Type-Options','nosniff'); c.header('Referrer-Policy','same-origin'); c.header('X-Frame-Options','DENY');
     if (error instanceof ApiException) {
       const codes = { 400: 'invalid', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 409: 'conflict' };
-      return c.json({ error: { code: codes[error.status], message: error.message } }, error.status);
+      return c.json({ error: { code: error.message === 'no_target' ? 'no_target' : codes[error.status], message: error.message } }, error.status);
     }
     // Error messages from upstream services can contain credentials; never log them.
     return c.json({ error: { code: 'internal', message: 'An unexpected server error occurred.' } }, 500);
@@ -40,6 +42,10 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch }: { da
     wid => pages.deleteWorkspace(wid), wid => events.emit(wid, { type: 'members' }),
   );
   registerPages(app, pages);
+  registerCollaboration(app,pages);
+  const notifications=new Notifications(store,pages,events,notificationOptions);
+  pages.notifications=notifications;
+  registerNotifications(app,notifications);notifications.start();
   registerDashboard(app,pages);
   registerCalendars(app,pages,fetchImpl);
   registerTransfer(app,pages,fetchImpl);

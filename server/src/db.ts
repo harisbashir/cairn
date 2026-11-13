@@ -3,11 +3,12 @@ import { mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Page } from '../../shared/types.ts';
+import { rebuildLinks } from './links.ts';
 import { docToPlainText } from '../../shared/markdown.ts';
 
 export const id = () => randomBytes(18).toString('base64url');
 export const now = () => new Date().toISOString();
-const tables = ['users', 'workspaces', 'pages', 'invites', 'tokens', 'versions', 'activity', 'files', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthClients', 'oauthRequests', 'oauthCodes', 'oauthGrants', 'backupSettings', 'backupRuns'] as const;
+const tables = ['users', 'workspaces', 'pages', 'invites', 'tokens', 'versions', 'activity', 'files', 'layouts', 'stickies', 'calendars', 'feeds', 'oauthClients', 'oauthRequests', 'oauthCodes', 'oauthGrants', 'backupSettings', 'backupRuns', 'notifications', 'pushSubscriptions', 'mailSettings', 'comments', 'changes'] as const;
 export type Table = typeof tables[number];
 
 export class Store {
@@ -58,6 +59,15 @@ export class Store {
         this.db.exec('PRAGMA user_version=2; COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
+    if (version < 3) {
+      this.transaction(() => {
+        for (const table of tables) this.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)))`);
+        this.db.exec('CREATE TABLE IF NOT EXISTS links (fromId TEXT NOT NULL,toId TEXT NOT NULL,via TEXT NOT NULL,PRIMARY KEY(fromId,toId,via)); CREATE INDEX IF NOT EXISTS links_target ON links(toId)');
+        for (const page of this.all<Page>('pages')) rebuildLinks(this,page);
+        this.reindex();
+        this.db.exec('PRAGMA user_version=3');
+      });
+    }
   }
   indexPage(page: Page) {
     const text: string[] = [];
@@ -76,13 +86,14 @@ export class Store {
   reindex() { this.db.exec('DELETE FROM search'); for(const page of this.all<Page>('pages'))this.indexPage(page); }
 
   defaults(table: Table, value: any): any {
-    if (table === 'users') value.prefs = { theme: 'system', accent: 'blue', ...value.prefs };
+    if (table === 'users') value.prefs = { theme: 'system', accent: 'blue', timezone: 'UTC', reminderHour: 9, capture: null, ...value.prefs, notify: { push: true, email: false, mentions: true, comments: true, assigned: true, ...value.prefs?.notify } };
+    if (table === 'activity') value.clientName ??= null;
     if (table === 'files') {
       let info; try { info=statSync(join(this.dataDir,'files',value.id)); } catch { /* An old upload may already be missing. */ }
       value.mime ??= value.type ?? 'application/octet-stream'; value.size ??= info?.size ?? 0;
       value.createdAt ??= info?.mtime.toISOString() ?? '1970-01-01T00:00:00.000Z';
     }
-    if (table === 'pages') { value.cover ??= ''; value.updatedByType ??= 'user'; }
+    if (table === 'pages') { value.cover ??= ''; value.updatedByType ??= 'user'; value.repeat ??= null; value.reminders ??= []; value.isTemplate ??= false; value.defaultTemplateId ??= null; }
     return value;
   }
 

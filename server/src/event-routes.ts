@@ -19,6 +19,7 @@ export function registerEvents(app: Hono<Env>, pages: Pages) {
         done = true;
         clearInterval(timer);
         unsubscribe();
+        unsubscribeUser();
         finish();
       };
       const send = (event: LiveEvent) => {
@@ -28,13 +29,14 @@ export function registerEvents(app: Hono<Env>, pages: Pages) {
           'SELECT role FROM memberships WHERE workspaceId=? AND userId=?',
         ).get(wid, actor.user.id);
         if (!current || !member) { stop(); return; }
-        if (event.type === 'page') {
+        if (event.type === 'page' || event.type === 'comments') {
           const page = pages.s.get<Page>('pages', event.pageId);
           if (!page || !pages.visible(page, current, true)) return;
         }
         void stream.writeSSE({ data: JSON.stringify(event) }).catch(stop);
       };
       const unsubscribe = pages.events.subscribe(wid, send);
+      const unsubscribeUser = pages.events.subscribeUser(actor.user.id,send);
       const timer = setInterval(() => send({ type: 'ping' }), 25000);
       timer.unref();
       stream.onAbort(stop);

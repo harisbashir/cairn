@@ -60,7 +60,7 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
   });
   app.patch('/api/me',async c=>{
     const v=await body(c,z.object({
-      prefs:z.object({theme:z.enum(['system','light','dark']).optional(),accent:z.enum(['blue','violet','green','orange','pink','graphite']).optional()}).strict().optional(),name:text.optional(),color:color.optional(),currentPassword:z.string().max(1024).optional(),newPassword:password.optional()
+      prefs:z.object({theme:z.enum(['system','light','dark']).optional(),accent:z.enum(['blue','violet','green','orange','pink','graphite']).optional(),timezone:z.string().refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone').optional(),reminderHour:z.number().int().min(0).max(23).optional(),notify:z.object({push:z.boolean().optional(),email:z.boolean().optional(),mentions:z.boolean().optional(),comments:z.boolean().optional(),assigned:z.boolean().optional()}).strict().optional(),capture:z.object({workspaceId:z.string().min(1),databaseId:z.string().min(1).nullable()}).nullable().optional()}).strict().optional(),name:text.optional(),color:color.optional(),currentPassword:z.string().max(1024).optional(),newPassword:password.optional()
     }));
     const u=s.get('users',c.get('actor').user.id)!;
     if(v.newPassword) {
@@ -69,7 +69,7 @@ export function registerAuthRoutes(app:Hono<Env>,s:Store,seed:(wid:string,actor:
     }
     if(v.name!==undefined)u.name=v.name;
     if(v.color!==undefined)u.color=v.color;
-    if(v.prefs)u.prefs={...u.prefs,...v.prefs};
+    if(v.prefs)u.prefs={...u.prefs,...v.prefs,notify:{...u.prefs.notify,...v.prefs.notify}};
     s.put('users',u);
     return c.json(publicUser(u));
   });
