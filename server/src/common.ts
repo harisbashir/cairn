@@ -2,6 +2,26 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import type { User, ActorType, Role } from '../../shared/types.ts';
 import type { Store } from './db.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Read from the nearest package.json so the version reported by the API and MCP
+// handshake matches the release (works from both server/src and dist/server/src).
+function readAppVersion(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    const file = join(dir, 'package.json');
+    if (existsSync(file)) {
+      const pkg = JSON.parse(readFileSync(file, 'utf8')) as { name?: string; version?: string };
+      if (pkg.name === 'cairn' && typeof pkg.version === 'string') return pkg.version;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return '0.0.0';
+    dir = parent;
+  }
+}
+export const appVersion = readAppVersion();
 
 type ErrorStatus = 400 | 401 | 403 | 404 | 409;
 export class ApiException extends Error {

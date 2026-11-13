@@ -9,7 +9,7 @@ import { safeDownload } from './outbound.ts';
 import { storeFile } from './file-storage.ts';
 import { exportPage } from './transfer.ts';
 import { view as viewSchema } from './page-validation.ts';
-import { fail, membership, publicUrl, type Actor, type Env } from './common.ts';
+import { appVersion, fail, membership, publicUrl, type Actor, type Env } from './common.ts';
 import { id } from './db.ts';
 import { Pages } from './pages.ts';
 import { docToMarkdown, markdownToDoc } from '../../shared/markdown.ts';
@@ -112,7 +112,7 @@ function visibleWorkspaces(pages: Pages, actor: Actor) {
 }
 
 function buildServer(pages: Pages, actor: Actor, publicUrl: string, fetchImpl: typeof fetch) {
-  const server = new McpServer({ name: 'cairn', version: '0.1.0' }, { instructions: `Cairn workspaces contain nested pages. A database is a page whose children are rows; rows have typed properties and their own page body. Content is exchanged as Markdown. Use ids to identify pages and property names and option names to work with database values. Open the workspace at ${publicUrl}.` });
+  const server = new McpServer({ name: 'cairn', version: appVersion }, { instructions: `Cairn workspaces contain nested pages. A database is a page whose children are rows; rows have typed properties and their own page body. Content is exchanged as Markdown. Use ids to identify pages and property names and option names to work with database values. Open the workspace at ${publicUrl}.` });
   function tool<T extends z.ZodRawShape>(name: string, description: string, inputSchema: T, write: boolean, callback: (input: z.infer<z.ZodObject<T>>) => unknown) {
     if (write && actor.access === 'read') return;
     server.registerTool<z.ZodRawShape, z.ZodObject<T>>(name, { description, inputSchema: z.object(inputSchema), annotations: { title: name.replace(/_/g,' '), readOnlyHint: !write, destructiveHint: /^(delete|update|move|restore|set)_/.test(name), idempotentHint: !write || /^(delete|update|set)_/.test(name) } }, async input => {

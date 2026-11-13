@@ -10,12 +10,12 @@ import type { Hono } from 'hono';
 import { z } from 'zod';
 import type { BackupDestination, BackupSettings, BackupRun } from '../../shared/types.ts';
 import { Store, id, now } from './db.ts';
-import { body, fail, type Env } from './common.ts';
+import { appVersion, body, fail, type Env } from './common.ts';
 import type { Pages } from './pages.ts';
 
 const runFile = promisify(execFile);
 const backupName = /^cairn-backup-\d{8}-\d{6}\.zip$/;
-export const backupVersion = '0.3.1';
+export const backupVersion = appVersion;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Backup failed.';
 export function rcloneAvailable(): boolean { const result = spawnSync('rclone', ['version'], { stdio: 'ignore', timeout: 5000 }); return !result.error && result.status === 0; }
 function defaultSettings(): BackupSettings { return { enabled: false, frequency: 'daily', hour: 3, weekday: 0, keep: 7, destinations: [], rcloneAvailable: rcloneAvailable() }; }

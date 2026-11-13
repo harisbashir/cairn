@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import type { Env } from './common.ts';
+import { appVersion, type Env } from './common.ts';
 
 type Schema = Record<string, unknown>;
 const str: Schema = { type: 'string' }, num: Schema = { type: 'number' }, bool: Schema = { type: 'boolean' };
@@ -231,5 +231,5 @@ export function openapi(app:Hono<Env>) {
   external('get','/files/{id}/{name}',{type:'string',format:'binary'},undefined,true,'200','application/octet-stream');
   paths['/files/{id}/{name}'].get.parameters=['id','name'].map(name=>({name,in:'path',required:true,schema:str})).concat([{name:'w',in:'query',required:false,schema:num},{name:'share',in:'query',required:false,schema:str}]);
   external('post','/mcp',record(),object({jsonrpc:choice('2.0'),id:{anyOf:[str,num]},method:str,params:record()},['jsonrpc','method']),true);
-  return {openapi:'3.1.0',info:{title:'Cairn API',version:'0.3.1'},servers:[{url:'/api/v1'}],paths,components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Session, API token, or OAuth access token.'},cookieAuth:{type:'apiKey',in:'cookie',name:'cairn_session'}},schemas}};
+  return {openapi:'3.1.0',info:{title:'Cairn API',version:appVersion},servers:[{url:'/api/v1'}],paths,components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Session, API token, or OAuth access token.'},cookieAuth:{type:'apiKey',in:'cookie',name:'cairn_session'}},schemas}};
 }

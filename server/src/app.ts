@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Store } from './db.ts';
-import { ApiException, type Env } from './common.ts';
+import { ApiException, appVersion, type Env } from './common.ts';
 import { apiAuthentication } from './api-auth.ts';
 import { hardening } from './http.ts';
 import { registerAccounts } from './accounts.ts';
@@ -36,7 +36,7 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch, notifi
   app.notFound(c => c.json({ error: { code: 'not_found', message: 'Resource not found.' } }, 404));
   app.use('*', hardening);
   app.use('/api/*', apiAuthentication(store));
-  app.get('/api/health',c=>c.json({ok:true,version:'0.3.1'}));
+  app.get('/api/health',c=>c.json({ok:true,version:appVersion}));
   registerAccounts(app, store,
     (wid, actor, title) => { pages.create(actor, wid, { title }); },
     wid => pages.deleteWorkspace(wid), wid => events.emit(wid, { type: 'members' }),

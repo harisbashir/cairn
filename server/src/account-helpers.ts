@@ -3,7 +3,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Role } from '../../shared/types.ts';
 import { Store, id, now } from './db.ts';
-import { fail, publicUser, type Actor } from './common.ts';
+import { appVersion, fail, publicUser, type Actor } from './common.ts';
 import { passwordFields } from './auth.ts';
 
 export const text = z.string().trim().min(1).max(1000);
@@ -53,7 +53,7 @@ export function bootstrap(s:Store,a?:Actor) {
   const st=settings(s);
   return {
     user:a?.user ?? null,instance:{
-      name:st.instanceName,allowSignup:st.allowSignup,needsSetup:s.all('users').length===0,version:'0.3.1'
+      name:st.instanceName,allowSignup:st.allowSignup,needsSetup:s.all('users').length===0,version:appVersion
     },workspaces:a?s.db.prepare('SELECT workspaceId FROM memberships WHERE userId=?').all(a.user.id).filter(m=>!a.workspaceId||a.workspaceId===m.workspaceId).map(m=>summary(s,String(m.workspaceId),a.user.id)):[]
   };
 }
