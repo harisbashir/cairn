@@ -1,6 +1,9 @@
 import type { UserPrefs } from '../../shared/types.ts';
 
-export const DEFAULT_PREFS: UserPrefs = { theme: 'system', accent: 'blue' };
+export const DEFAULT_PREFS: UserPrefs = {
+  theme: 'system', accent: 'blue', timezone: 'UTC', reminderHour: 9,
+  notify: { push: true, email: false, mentions: true, comments: true, assigned: true }, capture: null,
+};
 
 /** Applies appearance preferences to the document. 'system' follows the device setting. */
 export function applyPrefs(prefs: Partial<UserPrefs> | undefined): void {

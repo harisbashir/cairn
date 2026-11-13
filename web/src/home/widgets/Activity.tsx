@@ -7,7 +7,7 @@ import { num, type WidgetProps } from '../types.ts';
 import { LoadError, SettingSelect, Settings, WidgetMessage } from './kit.tsx';
 
 const VERB: Record<Activity['action'], string> = {
-  created: 'created', updated: 'edited', deleted: 'moved to Trash', restored: 'restored', moved: 'moved', shared: 'shared', joined: 'joined the workspace',
+  created: 'created', updated: 'edited', deleted: 'moved to Trash', restored: 'restored', moved: 'moved', shared: 'shared', joined: 'joined the workspace', repeated: 'repeated', undone: 'undid a change on',
 };
 
 export function ActivityWidget({ widget, editing, onChange }: WidgetProps) {

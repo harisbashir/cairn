@@ -1,6 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import {
   ArrowLeftRight, Calendar, Check, CheckSquare, ChevronDown, CircleDot, Hash, Link2, Plus, Tags, Type, User as UserIcon,
+  Paperclip, Sigma, SquareFunction,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import type {
@@ -20,7 +21,7 @@ export const hasOptions = (t: PropertyType) => t === 'select' || t === 'multi_se
 export const isMulti = (t: PropertyType) => t === 'multi_select' || t === 'person' || t === 'relation';
 
 export function PropIcon({ type, size = 15 }: { type: PropertyType | 'title'; size?: number }) {
-  const I = { title: Type, text: Type, number: Hash, select: ChevronDown, multi_select: Tags, status: CircleDot, date: Calendar, checkbox: CheckSquare, url: Link2, person: UserIcon, relation: ArrowLeftRight }[type];
+  const I = { title: Type, text: Type, number: Hash, select: ChevronDown, multi_select: Tags, status: CircleDot, date: Calendar, checkbox: CheckSquare, url: Link2, person: UserIcon, relation: ArrowLeftRight, files: Paperclip, rollup: Sigma, formula: SquareFunction }[type];
   return <I size={size} aria-hidden style={{ flex: 'none' }} />;
 }
 

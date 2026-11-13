@@ -47,7 +47,7 @@ export function AiTag() {
 }
 
 const VERB: Record<Activity['action'], string> = {
-  created: 'created', updated: 'edited', deleted: 'moved to Trash', restored: 'restored', moved: 'moved', shared: 'shared', joined: 'joined the workspace',
+  created: 'created', updated: 'edited', deleted: 'moved to Trash', restored: 'restored', moved: 'moved', shared: 'shared', joined: 'joined the workspace', repeated: 'repeated', undone: 'undid a change on',
 };
 
 export function Home() {

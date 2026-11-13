@@ -23,6 +23,23 @@ export type Accent = 'blue' | 'violet' | 'green' | 'orange' | 'pink' | 'graphite
 export interface UserPrefs {
   theme: ThemeMode; // default 'system'
   accent: Accent; // default 'blue'
+  timezone: string; // IANA zone, default 'UTC'; the web app sets it from the browser on first load
+  reminderHour: number; // 0-23, when reminders on date-only values fire, default 9
+  notify: NotifyPrefs;
+  capture: CaptureTarget | null; // where phone quick capture saves, default null (ask)
+}
+
+export interface NotifyPrefs {
+  push: boolean; // default true (only does anything once a device subscribed)
+  email: boolean; // default false; needs SMTP configured by the administrator
+  mentions: boolean; // notify when someone @-mentions me, default true
+  comments: boolean; // notify on replies and comments on pages I created, default true
+  assigned: boolean; // notify when I am added to a person property, default true
+}
+
+export interface CaptureTarget {
+  workspaceId: string;
+  databaseId: string | null; // null = a new page at the workspace root
 }
 
 export interface WorkspaceSummary {
@@ -88,7 +105,33 @@ export type PropertyType =
   | 'checkbox'
   | 'url'
   | 'person'
-  | 'relation';
+  | 'relation'
+  | 'files' // value: string[] of file URLs ('/files/<id>/<name>') uploaded to the workspace
+  | 'rollup' // computed, read-only: see RollupConfig
+  | 'formula'; // computed, read-only: see FormulaConfig
+
+export type RollupFn =
+  | 'count' // number of related rows (after filters)
+  | 'count_values' // number of non-empty target values
+  | 'sum' | 'avg' | 'min' | 'max' // number targets
+  | 'earliest' | 'latest' // date targets → 'YYYY-MM-DD' or ISO
+  | 'percent_checked' // checkbox target → 0-100
+  | 'show'; // the target values themselves → string[] (titles, option names, or values as text)
+
+export interface RollupConfig {
+  // Which related rows: either a relation property of this database, or an incoming relation
+  // (a relation property in another database that points at this database).
+  source: { kind: 'relation'; propertyId: string } | { kind: 'incoming'; databaseId: string; propertyId: string };
+  target: string; // 'title' or a property id of the related database
+  fn: RollupFn;
+  filters?: Filter[]; // applied to the related rows first, e.g. Status is not Done → "open tasks"
+}
+
+export interface FormulaConfig {
+  expression: string; // see docs/SPEC-0.3.md, section 3
+  // The result type, inferred on save; tells the UI how to render and filter it.
+  resultType?: 'text' | 'number' | 'checkbox' | 'date';
+}
 
 export interface SelectOption {
   id: string;
@@ -105,6 +148,9 @@ export interface Property {
   type: PropertyType;
   options?: SelectOption[]; // select, multi_select, status
   relationDatabaseId?: string; // relation
+  rollup?: RollupConfig; // rollup
+  formula?: FormulaConfig; // formula
+  numberFormat?: 'plain' | 'comma' | 'percent' | 'currency'; // number, rollup and formula numbers; default plain
 }
 
 // Row values by property id:
@@ -116,6 +162,8 @@ export interface Property {
 //   checkbox: boolean
 //   person: user id[]
 //   relation: row page id[]
+//   files: file URL[]
+//   rollup, formula: computed by the server on every read (Row.props, get_page, exports); never stored or writable
 // Missing or null means empty. The row title is Page.title, not a property.
 export type PropValue = string | number | boolean | string[] | null;
 export type Props = Record<string, PropValue>;
@@ -127,6 +175,8 @@ export type FilterOp =
 export interface Filter {
   propertyId: string; // 'title' targets the row title
   op: FilterOp;
+  // Special values resolved when the view is shown: '@this' = the page the view is embedded in
+  // (for relation contains/eq), '@me' = the current user (person), '@today' = today (date).
   value?: PropValue;
 }
 
@@ -210,8 +260,142 @@ export interface Page {
   favorite?: boolean;
   shareToken?: string | null;
   canEdit?: boolean;
+  commentCount?: number; // v0.3: open comment threads
   // For rows: the parent database's schema, so the row page can render its properties.
   parentSchema?: Property[];
+  // v0.3
+  repeat: Repeat | null; // rows only
+  reminders: Reminder[]; // rows and pages
+  isTemplate: boolean; // template rows live in their database but are hidden from views; template pages are hidden from the tree
+  defaultTemplateId: string | null; // databases only: template applied to new rows unless another is chosen
+}
+
+// ---------- v0.3: repeating rows, reminders, notifications ----------
+
+export interface Repeat {
+  dateProp: string; // the date property that moves forward
+  every: number; // 1..365
+  unit: 'day' | 'week' | 'month' | 'year';
+  weekdays?: number[]; // unit 'week' only: 0-6, 0 = Sunday; next matching weekday
+  from: 'due' | 'completed'; // next date counted from the old date, or from the day it was completed
+  until: string | null; // 'YYYY-MM-DD'; stop repeating after this date
+  // Completion: when this property becomes doneValue (status/select option id, or true for a checkbox),
+  // the server moves dateProp to the next occurrence and sets the property to resetValue.
+  doneProp: string;
+  doneValue: string | boolean;
+  resetValue: string | boolean | null;
+}
+
+export interface Reminder {
+  id: string;
+  // Relative to a date property of the row (fires offsetMinutes before it; date-only values count
+  // from the recipient's reminderHour in their timezone), or an absolute time when dateProp is null.
+  dateProp: string | null;
+  offsetMinutes: number; // >= 0, ignored for absolute reminders
+  at: string | null; // ISO, absolute reminders only
+  // Recipients: these users plus everyone in personProp (if set). Empty = the creator.
+  userIds: string[];
+  personProp: string | null;
+  createdBy: string;
+  lastFiredFor: string | null; // the occurrence (date value or 'at') it last fired for, so it fires once per occurrence
+}
+
+export type NotificationKind = 'reminder' | 'mention' | 'comment' | 'assigned' | 'repeat';
+export interface Notification {
+  id: string;
+  at: string;
+  kind: NotificationKind;
+  title: string; // e.g. the row title
+  body: string; // e.g. "Due today" or the comment text
+  pageId: string | null;
+  workspaceId: string;
+  actorName: string; // who caused it ('' for reminders)
+  read: boolean;
+}
+
+export interface PushSubscriptionInfo {
+  id: string;
+  device: string; // user-agent summary, e.g. "Safari on iPhone"
+  createdAt: string;
+}
+
+export interface MailSettings {
+  // instance administrator; password is write-only (reads return '' and hasPassword)
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean; // TLS from the start (465) instead of STARTTLS
+  username: string;
+  password: string;
+  hasPassword: boolean;
+  from: string; // "Cairn <cairn@example.com>"
+}
+
+// ---------- v0.3: templates ----------
+
+export interface TemplateSummary {
+  id: string; // the template page/row id
+  kind: 'page' | 'row';
+  title: string;
+  icon: string;
+  databaseId: string | null; // row templates: their database
+  databaseTitle: string;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+// ---------- v0.3: backlinks ----------
+
+export interface Backlink {
+  id: string; // the linking page
+  kind: PageKind;
+  title: string;
+  icon: string;
+  path: string; // ancestors, "Parent / Child"
+  snippet: string; // plain text around the link
+  via: 'link' | 'mention' | 'relation'; // relation = a row whose relation property points here
+}
+
+// ---------- v0.3: comments ----------
+
+export interface Comment {
+  id: string;
+  pageId: string;
+  threadId: string; // id of the first comment of the thread (itself for the first)
+  quote: string; // text the thread is anchored to ('' = page-level)
+  body: string; // plain text; mentions as @[Name](cairn://user/<id>)
+  resolved: boolean; // thread state, stored on the first comment
+  createdBy: string;
+  createdByName: string;
+  createdByType: ActorType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------- v0.3: change review (what AI agents changed, with undo) ----------
+
+export interface ChangeSummary {
+  id: string; // = the activity id
+  at: string;
+  actorName: string;
+  actorType: ActorType;
+  clientName: string | null; // API token name or OAuth client name, e.g. "Claude Code", "Muse"
+  action: Activity['action'];
+  pageId: string;
+  pageTitle: string;
+  pageIcon: string;
+  pageKind: PageKind;
+  databaseTitle: string; // rows: their database
+  fields: string[]; // human labels of what changed: 'Title', 'Content', property names, 'Properties', 'Views', 'Location'
+  canUndo: boolean; // false when nothing was recorded, it was already undone, or the page is permanently deleted
+  undoneAt: string | null;
+  undoneByName: string | null;
+}
+
+export interface ChangeDetail extends ChangeSummary {
+  // Human-readable before/after per changed field. Content is Markdown; properties by display value.
+  diffs: { field: string; before: string; after: string }[];
+  conflict: boolean; // the page changed again since; undo would overwrite newer edits
 }
 
 export interface Row {
@@ -278,7 +462,8 @@ export interface Activity {
   at: string;
   actorName: string;
   actorType: ActorType; // 'ai' when the change came through MCP
-  action: 'created' | 'updated' | 'deleted' | 'restored' | 'moved' | 'shared' | 'joined';
+  action: 'created' | 'updated' | 'deleted' | 'restored' | 'moved' | 'shared' | 'joined' | 'repeated' | 'undone';
+  clientName: string | null; // v0.3: token or OAuth client name for AI changes
   pageId: string | null;
   pageTitle: string;
   pageIcon: string;
@@ -329,6 +514,8 @@ export type LiveEvent =
   | { type: 'members' }
   | { type: 'home' }
   | { type: 'stickies' }
+  | { type: 'notifications' } // sent only to the recipient's streams
+  | { type: 'comments'; pageId: string }
   | { type: 'ping' };
 
 export interface ApiError {
@@ -348,7 +535,9 @@ export type WidgetType =
   | 'note' // free text written on the dashboard: config { markdown }
   | 'links' // quick links: config { links: { label, url }[] }
   | 'calendar' // upcoming dated rows + external calendar events: config { days? }
-  | 'stats'; // workspace counts
+  | 'stats' // workspace counts
+  | 'notifications' // v0.3: my unread notifications and upcoming reminders
+  | 'changes'; // v0.3: latest AI changes with a link to the review screen
 
 export interface Widget {
   id: string;
