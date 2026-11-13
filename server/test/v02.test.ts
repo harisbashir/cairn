@@ -91,7 +91,7 @@ describe('v0.2 REST contract and OAuth',()=>{
     expect((await request('/api/oauth/requests/missing','GET',undefined,(await (await request('/api/tokens','POST',{name:'api',access:'write'})).json() as any).secret)).status).toBe(403);
   });
   it('publishes health/OpenAPI and consistent security and CORS headers',async()=>{
-    const health=await request('/api/v1/health','GET',undefined,'');expect(await health.json()).toEqual({ok:true,version:'0.2.0'});expect(health.headers.get('x-frame-options')).toBe('DENY');
+    const health=await request('/api/v1/health','GET',undefined,'');expect(await health.json()).toEqual({ok:true,version:'0.3.0'});expect(health.headers.get('x-frame-options')).toBe('DENY');
     const error=await request('/api/workspaces/no/tree','GET',undefined,'');expect(error.headers.get('x-content-type-options')).toBe('nosniff');
     const schema:any=await(await request('/api/openapi.json','GET',undefined,'')).json();expect(schema.openapi).toBe('3.1.0');expect(schema.paths['/workspaces/{wid}/home'].put).toBeTruthy();expect(schema.components.schemas.User).toBeTruthy();
     process.env.CAIRN_CORS_ORIGINS='https://app.example';try{const allowed=await request('/api/health','GET',undefined,session,{Origin:'https://app.example'});expect(allowed.headers.get('access-control-allow-origin')).toBe('https://app.example');const denied=await request('/api/health','GET',undefined,session,{Origin:'https://evil.example'});expect(denied.headers.get('access-control-allow-origin')).toBeNull();}finally{delete process.env.CAIRN_CORS_ORIGINS;}

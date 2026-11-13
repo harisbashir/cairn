@@ -16,6 +16,10 @@ import { COLORS, PropIcon, useRelTitles, type Db } from './kit.tsx';
 import { groupableProps } from './groups.ts';
 import { ListView } from './ListView.tsx';
 import { FieldsMenu, FilterMenu, SortMenu } from './menus.tsx';
+import { PropConfigHost } from '../db3/PropConfig.tsx';
+import { NewRowButton, printView } from '../db3/Templates.tsx';
+import { isComputed } from '../db3/format.ts';
+import { Printer } from 'lucide-react';
 import { PhoneView } from './PhoneView.tsx';
 import { TableView } from './TableView.tsx';
 import { TimelineView } from './TimelineView.tsx';
@@ -69,21 +73,36 @@ function useDb(page: Page, canEdit: boolean, save: Save) {
   const shown = useMemo(() => applyView(rows, view, schema), [rows, view, schema]);
   const relTitles = useRelTitles(schema);
 
-  const setSchema = (next: Property[]) => { editing.current = Date.now(); setSchemaState(next); save({ schema: next }, true); };
+  const setSchema = (next: Property[]) => {
+    editing.current = Date.now(); setSchemaState(next); save({ schema: next }, true);
+    // Computed values come from the server: fetch rows again once the schema is saved.
+    const done = () => { window.removeEventListener('cairn:saved', done); qc.invalidateQueries({ queryKey: ['rows'] }); };
+    window.addEventListener('cairn:saved', done);
+    setTimeout(() => window.removeEventListener('cairn:saved', done), 10_000);
+  };
   const setViews = (next: View[]) => { editing.current = Date.now(); setViewsState(next); save({ views: next }, true); };
   const setView = (p: Partial<View>) => setViews(views.map((v) => (v.id === view.id ? { ...v, ...p } : v)));
   const pickView = (id: string) => { setViewId(id); localStorage.setItem(`cairn.view.${page.id}`, id); };
 
   const patchRow: Db['patchRow'] = (id, body) => {
     qc.setQueryData<Row[]>(['rows', page.id], (old) => old?.map((r) => (r.id === id ? { ...r, ...(body.title !== undefined ? { title: body.title } : {}), props: { ...r.props, ...body.props } } : r)));
-    patch(`/api/pages/${id}`, body).then(() => qc.invalidateQueries({ queryKey: ['page', id] })).catch((err) => { ui.toast((err as Error).message); rowsQ.refetch(); });
+    patch(`/api/pages/${id}`, body).then(() => {
+      qc.invalidateQueries({ queryKey: ['page', id] });
+      // Rollups and formulas (here and in related databases) may change with any edit.
+      if (schema.some(isComputed) || body.props) qc.invalidateQueries({ queryKey: ['rows'] });
+    }).catch((err) => { ui.toast((err as Error).message); rowsQ.refetch(); });
   };
-  const addRow: Db['addRow'] = async (props = {}) => {
+  const addRow: Db['addRow'] = async (props = {}, templateId) => {
     // New rows start out matching simple "is" filters so they don't vanish from the view.
     const preset: Props = {};
-    for (const f of view.filters) if (f.op === 'eq' && f.propertyId !== 'title' && f.value !== undefined) preset[f.propertyId] = f.value;
+    for (const f of view.filters) {
+      const p = schema.find((x) => x.id === f.propertyId);
+      if (f.op === 'eq' && p && !isComputed(p) && f.value !== undefined && !String(f.value).startsWith('@')) preset[f.propertyId] = f.value;
+    }
     try {
-      const created = await post<Page>(`/api/workspaces/${s.wid}/pages`, { kind: 'row', parentId: page.id, title: '', props: { ...preset, ...props } });
+      const created = await post<Page>(`/api/workspaces/${s.wid}/pages`, {
+        kind: 'row', parentId: page.id, props: { ...preset, ...props }, ...(templateId !== undefined ? { templateId } : {}),
+      });
       const fresh = await rowsQ.refetch();
       return fresh.data?.find((r) => r.id === created.id) ?? null;
     } catch (err) { ui.toast((err as Error).message); return null; }
@@ -147,9 +166,10 @@ export function DatabaseView({ page, canEdit, save }: { page: Page; canEdit: boo
         <FilterMenu db={db} />
         <SortMenu db={db} />
         <FieldsMenu db={db} />
-        {canEdit && <button className="btn primary small db-new" aria-label="New row" onClick={focusNew}><Plus size={15} /><span>New</span></button>}
+        {canEdit && <NewRowButton db={db} onBlank={focusNew} />}
       </div>
-      {loading ? null : <ViewBody db={db} />}
+      {loading ? null : <div className="d3-print-target"><ViewBody db={db} /></div>}
+      <PropConfigHost db={db} />
     </div>
   );
 }
@@ -235,7 +255,9 @@ function ViewMenu({ db, canDelete, onDelete }: { db: Db; canDelete: boolean; onD
           </label>
         )}
       </div>
-      {canDelete && (<><div className="menu-sep" /><MenuItem danger icon={<Trash2 size={16} />} onClick={onDelete}>Delete View</MenuItem></>)}
+      <div className="menu-sep" />
+      <MenuItem icon={<Printer size={16} />} onClick={() => printView()}>Print</MenuItem>
+      {canDelete && <MenuItem danger icon={<Trash2 size={16} />} onClick={onDelete}>Delete View</MenuItem>}
     </div>
   );
 }

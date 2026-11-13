@@ -1,5 +1,5 @@
 import {
-  Activity, CalendarDays, ChartColumn, FileText, History, Link2, NotebookPen, Star, StickyNote, Sun, Table2, type LucideIcon,
+  Activity, Bell, Bot, CalendarDays, ChartColumn, FileText, History, Link2, NotebookPen, Star, StickyNote, Sun, Table2, type LucideIcon,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { TreeNode, Widget, WidgetType } from '../../../shared/types.ts';
@@ -15,6 +15,7 @@ import { RecentWidget } from './widgets/Recent.tsx';
 import { StatsWidget } from './widgets/Stats.tsx';
 import { ViewWidget } from './widgets/View.tsx';
 import { WelcomeWidget } from './widgets/Welcome.tsx';
+import { ChangesAction, ChangesWidget, NotificationsAction, NotificationsWidget } from '../inbox/widgets.tsx';
 
 export interface WidgetKind {
   type: WidgetType;
@@ -42,6 +43,8 @@ export const WIDGETS: WidgetKind[] = [
   { type: 'links', name: 'Quick links', description: 'Buttons to websites and pages you open often.', icon: Link2, size: 'third', config: { links: [] }, Component: LinksWidget },
   { type: 'calendar', name: 'Coming up', description: 'Dated rows and subscribed calendars for the days ahead.', icon: CalendarDays, size: 'third', config: { days: 14 }, Component: CalendarWidget },
   { type: 'stats', name: 'Workspace at a glance', description: 'Counts of pages, rows, members and edits this week.', icon: ChartColumn, size: 'two-thirds', config: {}, Component: StatsWidget },
+  { type: 'notifications', name: 'Notifications', description: 'Your unread mentions, replies and assignments, and the next reminders.', icon: Bell, size: 'third', config: { limit: 5 }, Component: NotificationsWidget, Action: NotificationsAction },
+  { type: 'changes', name: 'AI changes', description: 'What AI agents changed lately, with a link to review and undo.', icon: Bot, size: 'half', config: { limit: 5 }, Component: ChangesWidget, Action: ChangesAction },
 ];
 
 export const KIND = new Map(WIDGETS.map((k) => [k.type, k]));

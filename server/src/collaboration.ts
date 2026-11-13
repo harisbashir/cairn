@@ -69,7 +69,7 @@ export function capture(
     wid = actor.user.prefs.capture?.workspaceId;
     dbid ??= actor.user.prefs.capture?.databaseId ?? undefined;
   }
-  if (!wid) fail(400, 'no_target');
+  if (!wid) fail(400, 'Choose where quick capture saves: pass workspaceId (and databaseId), or set a capture destination in Cairn.');
   membership(pages.s, actor, wid, true);
   const database = dbid ? pages.get(actor, dbid, true) : null;
   if (database && (database.kind !== 'database' || database.workspaceId !== wid))
@@ -184,7 +184,7 @@ export function registerCollaboration(app: Hono<Env>, pages: Pages): void {
   );
   app.get('/api/changes/:id', (c) => c.json(changeDetail(pages, c.get('actor'), c.req.param('id'))));
   app.post('/api/changes/:id/undo', async (c) => {
-    const input = await body(c, z.object({ force: z.boolean().optional() }));
+    const input = c.req.header('content-length') === '0' || !c.req.header('content-type') ? {} as { force?: boolean } : await body(c, z.object({ force: z.boolean().optional() }));
     return c.json(undoChange(pages, c.get('actor'), c.req.param('id'), input.force));
   });
   app.post('/api/changes/undo', async (c) => {

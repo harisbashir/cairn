@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Row } from '../../../shared/types.ts';
 import { Popover } from '../ui.tsx';
-import { PropIcon, PropValueEditor, type Db } from './kit.tsx';
+import { marksProp, PropIcon, PropValueEditor, type Db } from './kit.tsx';
+import { RowMarks } from '../db3/Values.tsx';
 import { AddProperty, PropertyMenu } from './menus.tsx';
 
 export function TitleInput({ row, db }: { row: Row; db: Db }) {
@@ -17,6 +18,7 @@ export function TitleInput({ row, db }: { row: Row; db: Db }) {
 export function TableView({ db }: { db: Db }) {
   const { view, schema, shown, canEdit } = db;
   const cols = schema.filter((p) => !(view.hidden ?? []).includes(p.id));
+  const markId = (r: Row) => marksProp(schema, r);
   const [widths, setWidths] = useState<Record<string, number>>(view.widths ?? {});
   useEffect(() => setWidths(view.widths ?? {}), [view.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const w = (id: string) => widths[id] ?? (id === 'title' ? 300 : 180);
@@ -54,6 +56,7 @@ export function TableView({ db }: { db: Db }) {
               {cols.map((c) => (
                 <td key={c.id}>
                   <PropValueEditor prop={c} value={r.props[c.id] ?? null} editable={canEdit} users={db.users} wid={db.wid}
+                    marks={c.id === markId(r) ? <RowMarks row={r as never} /> : undefined}
                     onChange={(v) => db.patchRow(r.id, { props: { [c.id]: v } })} onAddOption={(name) => db.addOption(c.id, name)} />
                 </td>
               ))}

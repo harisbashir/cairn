@@ -46,6 +46,35 @@ instead of side-by-side columns; calendars and timelines as an agenda; menus as 
 `POST /api/v1/workspaces/:id/files` (multipart `file`) returns a URL to embed in a page body as
 an `image` node. Fetch files with the same bearer credential.
 
+## Quick capture
+
+The installed web app takes shares directly: on Android, Cairn appears in the share sheet
+(manifest `share_target`), and long-pressing its icon offers **New task**. Both open `/capture`,
+which also reads `?title=`, `?text=`, `?url=` and `?new=1` if you link to it yourself.
+
+### iOS Shortcuts
+
+iOS doesn't list web apps in the share sheet, so use a Shortcut that calls the API:
+
+1. In Cairn, open Settings → AI & MCP and create an API token with **write** access. Copy the
+   secret (it starts with `cairn_`); it is shown once.
+2. In the Shortcuts app, create a shortcut and turn on **Show in Share Sheet** (accepting URLs
+   and text).
+3. Add **Get Contents of URL**:
+   - URL: `https://<server>/api/v1/capture`
+   - Method: `POST`
+   - Headers: `Authorization` = `Bearer cairn_…`
+   - Request Body: JSON with `title` (text), `text` (Shortcut Input) and, for links, `url`.
+4. Optionally add **Show Notification** with the result, or **Open URLs** with
+   `https://<server>/p/` followed by the returned `page.id` to jump to the new page.
+
+The body is `{ "title"?, "text"?, "url"?, "workspaceId"?, "databaseId"? }` and the response is
+`{ "page": Page }`. Without `workspaceId`/`databaseId` the page goes where the person last saved
+a capture in the web app (`prefs.capture`); if they never have, the request fails with
+`no_target`, so either capture once in the web app or pass `workspaceId` (and `databaseId` to add
+a row to a database). With a bearer token the `X-Cairn-Client` header isn't needed. `url` must be
+`http` or `https`.
+
 ## Not there yet
 
 Push notifications (APNs / FCM), real-time co-editing, and a delta sync endpoint. They are on the

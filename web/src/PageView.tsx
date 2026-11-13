@@ -1,11 +1,16 @@
-import { Copy, Globe, Printer, History, Share as ShareIcon, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2 } from 'lucide-react';
+import { Copy, Globe, Printer, History, Share as ShareIcon, Link2, MoreHorizontal, RotateCcw, SmilePlus, Star, Trash2, LayoutTemplate, BellPlus } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { DocNode, Page, Props } from '../../shared/types.ts';
-import { clientId, del, invalidateWorkspace, post, qc, timeAgo, usePage, useVersions, useWsUsers } from './api.ts';
+import { clientId, del, invalidateWorkspace, patch, post, qc, timeAgo, usePage, useVersions, useWsUsers } from './api.ts';
 import { DatabaseView, PropIcon, PropValueEditor } from './Database.tsx';
 import { Editor } from './Editor.tsx';
+import { Backlinks } from './editor/Backlinks.tsx';
+import { PageReminders, RemindLine, RepeatLine } from './db3/RowExtras.tsx';
+import { saveAsTemplate, StartFromTemplate, TemplateBanner } from './db3/Templates.tsx';
+import { refreshAfterSave } from './db3/format.ts';
 import { AiTag, TopBar } from './Home.tsx';
+import { CommentsButton } from './inbox/Comments.tsx';
 import { PageIcon, useShell } from './Shell.tsx';
 import { CopyButton, EmojiPicker, MenuItem, Modal, Popover, Switch, useIsPhone, useUi } from './ui.tsx';
 
@@ -91,6 +96,7 @@ function PageView({ page }: { page: Page }) {
   const [icon, setIcon] = useState(page.icon);
   const [version, setVersion] = useState(page.updatedAt);
   const [history, setHistory] = useState(false);
+  const [remind, setRemind] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const titleDirty = useRef(false);
   const users = useWsUsers(s.wid);
@@ -132,6 +138,7 @@ function PageView({ page }: { page: Page }) {
           )}
         </span>
         {canEdit && <SharePopover page={page} />}
+        {!page.deletedAt && <CommentsButton page={page} />}
         <button className={`icon-btn${page.favorite ? ' on' : ''}`} aria-label={page.favorite ? 'Remove from Favorites' : 'Add to Favorites'} aria-pressed={!!page.favorite}
           title={page.favorite ? 'Remove from Favorites' : 'Add to Favorites'} onClick={() => s.toggleFavorite(page.id, !page.favorite)}>
           <Star size={16} fill={page.favorite ? 'currentColor' : 'none'} />
@@ -140,6 +147,8 @@ function PageView({ page }: { page: Page }) {
           <MenuItem icon={<Link2 size={16} />} onClick={() => { navigator.clipboard.writeText(location.href); ui.toast('Link copied'); }}>Copy Link</MenuItem>
           <MenuItem icon={<History size={16} />} onClick={() => setHistory(true)}>Version History</MenuItem>
           <MenuItem icon={<Printer size={16} />} onClick={() => setTimeout(() => window.print(), 50)}>Print or Save as PDF</MenuItem>
+          {canEdit && !page.isTemplate && page.kind !== 'database' && <MenuItem icon={<LayoutTemplate size={16} />} onClick={() => saveAsTemplate(page, ui.toast)}>Save as Template</MenuItem>}
+          {canEdit && page.kind === 'page' && !page.isTemplate && <MenuItem icon={<BellPlus size={16} />} onClick={() => setRemind(true)}>Remind Me…</MenuItem>}
           {canEdit && <MenuItem icon={<Copy size={16} />} onClick={async () => { await post(`/api/pages/${page.id}/duplicate`); invalidateWorkspace(s.wid); qc.invalidateQueries({ queryKey: ['rows', page.parentId] }); ui.toast('Duplicated'); }}>Duplicate</MenuItem>}
           {canEdit && <><div className="menu-sep" /><MenuItem danger icon={<Trash2 size={16} />} onClick={() => s.trashPage(page.id, title)}>Move to Trash</MenuItem></>}
         </Popover>
@@ -150,6 +159,7 @@ function PageView({ page }: { page: Page }) {
           {page.canEdit && <button className="btn small" onClick={async () => { await post(`/api/pages/${page.id}/restore`); invalidateWorkspace(s.wid); qc.invalidateQueries({ queryKey: ['page', page.id] }); }}><RotateCcw size={14} />Restore</button>}
         </div>
       )}
+      <TemplateBanner page={page} />
       <div className="content">
         <div className={`page${isDb ? ' wide' : ''}`}>
           <div className="page-head">
@@ -185,11 +195,24 @@ function PageView({ page }: { page: Page }) {
                     onChange={(v) => {
                       qc.setQueryData<Page>(['page', page.id], (old) => (old ? { ...old, props: { ...old.props, [prop.id]: v } } : old));
                       save({ props: { [prop.id]: v } }, true);
+                      refreshAfterSave(page.id);
                     }}
                   />
                 </div>
               ))}
+              {!page.isTemplate && <RepeatLine page={page} schema={page.parentSchema} canEdit={canEdit} />}
+              {!page.isTemplate && <RemindLine page={page} schema={page.parentSchema} canEdit={canEdit} />}
             </div>
+          )}
+          {page.kind === 'page' && <PageReminders page={page} canEdit={canEdit} open={remind} onClose={() => setRemind(false)} />}
+          {page.kind === 'page' && canEdit && !page.isTemplate && isEmptyDoc(page.content) && (
+            <StartFromTemplate page={page} onApply={async (t) => {
+              try {
+                await patch(`/api/pages/${page.id}`, t);
+                setTitle(t.title); setIcon(t.icon);
+                await qc.invalidateQueries({ queryKey: ['page', page.id] });
+              } catch (err) { ui.toast((err as Error).message); }
+            }} />
           )}
 
           {isDb ? (
@@ -197,6 +220,7 @@ function PageView({ page }: { page: Page }) {
           ) : (
             <Editor wid={s.wid} content={page.content} version={version} editable={canEdit} pages={s.tree?.nodes ?? []} onChange={(doc: DocNode) => save({ content: doc })} />
           )}
+          <Backlinks pageId={page.id} />
         </div>
       </div>
       {history && <HistoryModal page={page} onClose={() => setHistory(false)} />}
@@ -260,3 +284,6 @@ function HistoryModal({ page, onClose }: { page: Page; onClose: () => void }) {
     </Modal>
   );
 }
+
+const isEmptyDoc = (d: DocNode | null | undefined) =>
+  !d || !d.content?.length || (d.content.length === 1 && d.content[0].type === 'paragraph' && !d.content[0].content?.length);

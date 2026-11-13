@@ -712,6 +712,8 @@ button.cell:hover { background: var(--hover); }
   #root, .shell, .main, .content { display: block !important; height: auto !important; overflow: visible !important; }
   .sidebar, .tabbar, .topbar, .page-tools, .toast, .menu, .popover, .bubble-menu, .slash-menu,
   .view-tabs, .view-toolbar, .db-toolbar, .add-row, .new-row, .fab, .no-print, button:not(.print-keep) { display: none !important; }
+  .props button, .props .cell button, table button.cell { display: revert !important; border: 0 !important; background: none !important; padding: 0 !important; }
+  .props button svg.lucide-chevron-down, .props .placeholder, .props input::placeholder { display: none !important; }
   .page, .page.wide { max-width: none !important; padding: 0 !important; margin: 0 !important; }
   .page-cover { height: 90px !important; }
   .page-title { font-size: 26pt !important; }

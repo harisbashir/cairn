@@ -1,5 +1,5 @@
 import {
-  ArrowLeftRight, Building2, CalendarDays, ChevronLeft, ChevronRight, DatabaseBackup, Palette, ShieldCheck, Sparkles, UserCircle, Users, X,
+  ArrowLeftRight, Bell, Building2, CalendarDays, ChevronLeft, ChevronRight, DatabaseBackup, Mail, Palette, ShieldCheck, Sparkles, UserCircle, Users, X,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useShell } from './Shell.tsx';
@@ -10,10 +10,12 @@ import { AiSection } from './settings/Ai.tsx';
 import { BackupsSection } from './settings/Backups.tsx';
 import { CalendarsSection } from './settings/Calendars.tsx';
 import { DataSection } from './settings/Data.tsx';
+import { MailSection } from './settings/Mail.tsx';
+import { NotificationsSection } from './settings/Notifications.tsx';
 import { MembersSection, WorkspaceSection } from './settings/Workspace.tsx';
 import './settings/settings.css';
 
-export type SettingsSection = 'account' | 'appearance' | 'ai' | 'workspace' | 'members' | 'data' | 'calendars' | 'admin' | 'backups';
+export type SettingsSection = 'account' | 'appearance' | 'ai' | 'workspace' | 'members' | 'data' | 'calendars' | 'admin' | 'backups' | 'notifications' | 'mail';
 
 interface NavGroup { label: string; items: { id: SettingsSection; icon: ReactNode; label: string }[] }
 
@@ -27,6 +29,7 @@ export function SettingsModal({ section, onSection, onClose }: { section: Settin
     { label: 'You', items: [
       { id: 'account', icon: <UserCircle size={16} />, label: 'My Account' },
       { id: 'appearance', icon: <Palette size={16} />, label: 'Appearance' },
+      { id: 'notifications', icon: <Bell size={16} />, label: 'Notifications' },
       { id: 'ai', icon: <Sparkles size={16} />, label: 'AI & MCP' },
     ] },
     { label: s.workspace.name, items: [
@@ -40,6 +43,7 @@ export function SettingsModal({ section, onSection, onClose }: { section: Settin
     groups.push({ label: 'Server', items: [
       { id: 'admin', icon: <ShieldCheck size={16} />, label: 'Administration' },
       { id: 'backups', icon: <DatabaseBackup size={16} />, label: 'Backups' },
+      { id: 'mail', icon: <Mail size={16} />, label: 'Email' },
     ] });
   }
 
@@ -47,6 +51,7 @@ export function SettingsModal({ section, onSection, onClose }: { section: Settin
     <>
       {section === 'account' && <Account />}
       {section === 'appearance' && <Appearance />}
+      {section === 'notifications' && <NotificationsSection />}
       {section === 'ai' && <AiSection />}
       {section === 'workspace' && <WorkspaceSection manages={manages} onClose={onClose} />}
       {section === 'members' && <MembersSection manages={manages} />}
@@ -54,6 +59,7 @@ export function SettingsModal({ section, onSection, onClose }: { section: Settin
       {section === 'calendars' && <CalendarsSection />}
       {section === 'admin' && s.user.isAdmin && <AdminSection />}
       {section === 'backups' && s.user.isAdmin && <BackupsSection />}
+      {section === 'mail' && s.user.isAdmin && <MailSection />}
     </>
   );
 

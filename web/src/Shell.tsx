@@ -1,12 +1,16 @@
 import {
   ChevronRight, ChevronsUpDown, Copy, FilePlus2, FileText, Home as HomeIcon, Lock, LogOut, MoreHorizontal, PanelLeft, Plus,
-  Search, Settings as SettingsIcon, Star, StarOff, Table2, Trash2, UserPlus, Users, Check, Sparkles,
+  Search, Settings as SettingsIcon, Star, StarOff, Table2, Trash2, UserPlus, Users, Check, Sparkles, LayoutTemplate,
+  Bell, Bot, SquarePen,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import type { Bootstrap, LiveEvent, Page, PageKind, SearchHit, Tree, TreeNode, User, Visibility, WorkspaceSummary } from '../../shared/types.ts';
 import { clientId, MOD, del, invalidateWorkspace, patch, post, put, qc, searchPages, useTree } from './api.ts';
 import { SettingsModal, type SettingsSection } from './Settings.tsx';
+import { openTemplatePicker, TemplatePickerHost } from './db3/Templates.tsx';
+import { syncTimezone } from './inbox/hooks.ts';
+import { NotificationBell, UnreadBadge } from './inbox/Notifications.tsx';
 import { applyPrefs } from './theme.ts';
 import { Avatar, MenuItem, Modal, Popover, useIsPhone, useUi, WsBadge, WS_COLORS } from './ui.tsx';
 
@@ -17,7 +21,7 @@ interface ShellCtx {
   boot: Bootstrap;
   canEdit: boolean;
   tree: Tree | undefined;
-  createPage: (opts: { parentId?: string | null; kind?: PageKind; visibility?: Visibility; title?: string }) => Promise<Page | null>;
+  createPage: (opts: { parentId?: string | null; kind?: PageKind; visibility?: Visibility; title?: string; templateId?: string }) => Promise<Page | null>;
   trashPage: (id: string, title: string) => Promise<void>;
   toggleFavorite: (id: string, on: boolean) => Promise<void>;
   openSettings: (section?: SettingsSection) => void;
@@ -62,6 +66,7 @@ export function Shell({ boot }: { boot: Bootstrap }) {
   const tree = useTree(workspace ? wid : '');
 
   useEffect(() => { if (workspace) localStorage.setItem('cairn.ws', wid); }, [wid, workspace]);
+  useEffect(() => { if (boot.user) syncTimezone(boot.user); }, [boot.user]);
 
   // Live updates from other people, other tabs and AI agents.
   useEffect(() => {
@@ -77,6 +82,9 @@ export function Shell({ boot }: { boot: Bootstrap }) {
         qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).toLowerCase().includes(word) });
         return;
       }
+      if (ev.type === 'notifications') { qc.invalidateQueries({ queryKey: ['notifications'] }); return; }
+      if (ev.type === 'comments') { qc.invalidateQueries({ queryKey: ['comments', ev.pageId] }); qc.invalidateQueries({ queryKey: ['page', ev.pageId] }); return; }
+      if (ev.type === 'page') qc.invalidateQueries({ queryKey: ['changes', wid] });
       if (ev.type !== 'page' || ev.clientId === clientId) return;
       invalidateWorkspace(wid);
       qc.invalidateQueries({ queryKey: ['page', ev.pageId] });
@@ -146,6 +154,7 @@ export function Shell({ boot }: { boot: Bootstrap }) {
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
       {settings && <SettingsModal section={settings} onSection={setSettings} onClose={() => setSettings(null)} />}
+      <TemplatePickerHost />
       {newWs && <NewWorkspace onClose={() => setNewWs(false)} />}
     </Ctx.Provider>
   );
@@ -276,12 +285,14 @@ function Sidebar({ onNewWorkspace }: { onNewWorkspace: () => void }) {
       <div className="side-top">
         <div className="row" style={{ gap: 2 }}>
           <WorkspaceSwitcher onNew={onNewWorkspace} />
+          <NotificationBell />
           <button className="icon-btn" aria-label="Hide sidebar" title={`Hide sidebar (${MOD}\\)`} onClick={s.toggleSidebar}><PanelLeft size={17} /></button>
         </div>
         <button className="side-search" onClick={s.openPalette}>
           <Search size={15} /><span className="grow">Search or jump to…</span><kbd>{MOD}K</kbd>
         </button>
         <NavLink end to={`/w/${s.wid}`} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}><HomeIcon size={16} />Home</NavLink>
+        <NavLink to={`/w/${s.wid}/changes`} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}><Bot size={16} />AI changes</NavLink>
       </div>
       <div className="side-scroll"><PageTree /></div>
       <div className="side-bottom">
@@ -318,10 +329,11 @@ function TabBar() {
           <MenuItem icon={<FileText size={18} />} onClick={() => s.createPage({})}>Page</MenuItem>
           <MenuItem icon={<Table2 size={18} />} onClick={() => s.createPage({ kind: 'database' })}>Database</MenuItem>
           <MenuItem icon={<Lock size={18} />} onClick={() => s.createPage({ visibility: 'private' })}>Private Page</MenuItem>
+          <MenuItem icon={<LayoutTemplate size={18} />} onClick={() => openTemplatePicker({})}>From Template…</MenuItem>
         </Popover>
       ) : <span className="tab" />}
       <button className="tab" onClick={s.openPalette}><Search size={22} /><span>Search</span></button>
-      {tab(`/w/${s.wid}/more`, false, <Avatar name={s.user.name} color={s.user.color} />, 'More')}
+      {tab(`/w/${s.wid}/more`, false, <span className="inb-tab-av"><Avatar name={s.user.name} color={s.user.color} /><UnreadBadge className="dot" /></span>, 'More')}
     </nav>
   );
 }
@@ -351,6 +363,11 @@ export function MorePage() {
       <header className="topbar"><h1 className="phone-title">More</h1></header>
       <div className="content"><div className="browse">
         <div className="more-me"><Avatar name={s.user.name} color={s.user.color} large /><span><b>{s.user.name}</b><div className="subtle">{s.user.email}</div></span></div>
+        <div className="more-group" style={{ marginTop: 12 }}>
+          <button className="more-row" onClick={() => navigate(`/w/${s.wid}/notifications`)}><Bell size={20} /><span className="grow">Notifications</span><UnreadBadge /><ChevronRight size={18} /></button>
+          {s.canEdit && row(<SquarePen size={20} />, 'Quick Capture', () => navigate('/capture?new=1'))}
+          {row(<Bot size={20} />, 'AI Changes', () => navigate(`/w/${s.wid}/changes`))}
+        </div>
         <div className="side-head"><span>Workspaces</span></div>
         <div className="more-group">
           {s.boot.workspaces.map((w) => (
@@ -399,6 +416,7 @@ function NewMenu({ parentId, visibility, label }: { parentId: string | null; vis
     <Popover trigger={(p) => <button className="icon-btn" aria-label={label} title={label} {...p}><Plus size={15} /></button>}>
       <MenuItem icon={<FileText size={16} />} onClick={() => s.createPage({ parentId, visibility })}>Page</MenuItem>
       <MenuItem icon={<Table2 size={16} />} onClick={() => s.createPage({ parentId, visibility, kind: 'database' })}>Database</MenuItem>
+      <MenuItem icon={<LayoutTemplate size={16} />} onClick={() => openTemplatePicker({ parentId, visibility })}>From Template…</MenuItem>
     </Popover>
   );
 }

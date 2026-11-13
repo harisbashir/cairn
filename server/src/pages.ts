@@ -93,6 +93,7 @@ export class Pages {
       cover: page.cover || firstImage(page.content), preview: docToPlainText(page.content).slice(0, 200),
       createdBy: page.createdBy, createdByName: this.s.get('users', page.createdBy)?.name ?? 'Former member', updatedByType: page.updatedByType ?? 'user',
       hasContent: !!page.content?.content?.length, createdAt: page.createdAt, updatedAt: page.updatedAt,
+      repeat: page.repeat ?? null, reminders: page.reminders ?? [],
     };
   }
 

@@ -28,7 +28,7 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch, notifi
     c.header('X-Content-Type-Options','nosniff'); c.header('Referrer-Policy','same-origin'); c.header('X-Frame-Options','DENY');
     if (error instanceof ApiException) {
       const codes = { 400: 'invalid', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 409: 'conflict' };
-      return c.json({ error: { code: error.message === 'no_target' ? 'no_target' : codes[error.status], message: error.message } }, error.status);
+      return c.json({ error: { code: error.message.startsWith('Choose where quick capture saves') ? 'no_target' : codes[error.status], message: error.message } }, error.status);
     }
     // Error messages from upstream services can contain credentials; never log them.
     return c.json({ error: { code: 'internal', message: 'An unexpected server error occurred.' } }, 500);
@@ -36,7 +36,7 @@ export function createApp({ dataDir, fetch: fetchImpl = globalThis.fetch, notifi
   app.notFound(c => c.json({ error: { code: 'not_found', message: 'Resource not found.' } }, 404));
   app.use('*', hardening);
   app.use('/api/*', apiAuthentication(store));
-  app.get('/api/health',c=>c.json({ok:true,version:'0.2.0'}));
+  app.get('/api/health',c=>c.json({ok:true,version:'0.3.0'}));
   registerAccounts(app, store,
     (wid, actor, title) => { pages.create(actor, wid, { title }); },
     wid => pages.deleteWorkspace(wid), wid => events.emit(wid, { type: 'members' }),

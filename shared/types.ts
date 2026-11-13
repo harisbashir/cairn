@@ -412,6 +412,8 @@ export interface Row {
   updatedByType: ActorType;
   createdAt: string;
   updatedAt: string;
+  repeat: Repeat | null; // v0.3
+  reminders: Reminder[]; // v0.3
 }
 
 export interface Tree {

@@ -1,9 +1,11 @@
-import { ArrowDownUp, Check, EyeOff, ListFilter, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { ArrowDownUp, Check, EyeOff, ListFilter, Pencil, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import type { Filter, FilterOp, Property, PropertyType, Sort } from '../../../shared/types.ts';
 import { uid } from '../api.ts';
 import { useShell } from '../Shell.tsx';
 import { MenuItem, Popover, useUi } from '../ui.tsx';
 import { cardProps, COLORS, hasOptions, PropIcon, TYPES, type Db } from './kit.tsx';
+import { effectiveType, isComputed, NUMBER_FORMATS, resultKind } from '../db3/format.ts';
+import { configLabel, newPropertyDraft, openPropConfig } from '../db3/PropConfig.tsx';
 
 // ---------- Filter / sort / fields ----------
 const OPS: Record<string, [FilterOp, string][]> = {
@@ -13,19 +15,30 @@ const OPS: Record<string, [FilterOp, string][]> = {
   multi: [['contains', 'contains'], ['not_contains', 'doesn’t contain'], ['is_empty', 'is empty'], ['is_not_empty', 'is not empty']],
   date: [['eq', 'is'], ['lt', 'is before'], ['gt', 'is after'], ['is_empty', 'is empty'], ['is_not_empty', 'is not empty']],
   checkbox: [['checked', 'is checked'], ['unchecked', 'is not checked']],
+  files: [['is_empty', 'is empty'], ['is_not_empty', 'is not empty']],
 };
-const opGroup = (t: PropertyType | 'title') => (t === 'title' || t === 'text' || t === 'url' ? 'text' : t === 'number' ? 'number' : t === 'select' || t === 'status' ? 'select' : t === 'date' ? 'date' : t === 'checkbox' ? 'checkbox' : 'multi');
+const opGroup = (t: PropertyType | 'title') => (t === 'files' ? 'files' : t === 'title' || t === 'text' || t === 'url' ? 'text' : t === 'number' ? 'number' : t === 'select' || t === 'status' ? 'select' : t === 'date' ? 'date' : t === 'checkbox' ? 'checkbox' : 'multi');
 const noValue = (op: FilterOp) => op === 'is_empty' || op === 'is_not_empty' || op === 'checked' || op === 'unchecked';
 
 export function FilterMenu({ db }: { db: Db }) {
   const { view, schema, setView, canEdit } = db;
-  const fields: { id: string; name: string; type: PropertyType | 'title' }[] = [{ id: 'title', name: 'Name', type: 'title' }, ...schema];
-  const update = (i: number, p: Partial<Filter>) => setView({ filters: view.filters.map((f, j) => (j === i ? { ...f, ...p } : f)) });
   return (
     <Popover placement="bottom-end" trigger={(p) => <button className="btn ghost small" {...p}><ListFilter size={15} /><span className="hide-phone">Filter</span>{view.filters.length > 0 && <span className="pill-count">{view.filters.length}</span>}</button>}>
-      <div className="menu-pad" style={{ width: 430 }}>
-        {view.filters.length === 0 && <span className="subtle">Show only rows that match conditions.</span>}
-        {view.filters.map((f, i) => {
+      <div className="menu-pad" style={{ width: 430, maxWidth: '100%' }}>
+        <FilterList filters={view.filters} schema={schema} canEdit={canEdit} onChange={(filters) => setView({ filters })} empty="Show only rows that match conditions." />
+      </div>
+    </Popover>
+  );
+}
+
+/** The editable list of filter conditions, shared by views and rollups. */
+export function FilterList({ filters, schema, canEdit, onChange, empty }: { filters: Filter[]; schema: Property[]; canEdit: boolean; onChange: (f: Filter[]) => void; empty: string }) {
+  const fields: { id: string; name: string; type: PropertyType | 'title' }[] = [{ id: 'title', name: 'Name', type: 'title' }, ...schema.map((p) => ({ id: p.id, name: p.name, type: effectiveType(p) }))];
+  const update = (i: number, p: Partial<Filter>) => onChange(filters.map((f, j) => (j === i ? { ...f, ...p } : f)));
+  return (
+    <>
+        {filters.length === 0 && <span className="subtle">{empty}</span>}
+        {filters.map((f, i) => {
           const field = fields.find((x) => x.id === f.propertyId) ?? fields[0];
           const prop = schema.find((p) => p.id === f.propertyId);
           const group = opGroup(field.type);
@@ -38,7 +51,7 @@ export function FilterMenu({ db }: { db: Db }) {
               <select className="select small" style={{ width: 120 }} aria-label="Condition" disabled={!canEdit} value={f.op} onChange={(e) => update(i, { op: e.target.value as FilterOp })}>
                 {OPS[group].map(([op, label]) => <option key={op} value={op}>{label}</option>)}
               </select>
-              {noValue(f.op) ? <span className="grow" /> : prop && hasOptions(prop.type) ? (
+              {noValue(f.op) ? <span className="grow" /> : prop && hasOptions(prop.type) && !isComputed(prop) ? (
                 <select className="select small grow" aria-label="Value" disabled={!canEdit} value={String(f.value ?? '')} onChange={(e) => update(i, { value: e.target.value || undefined })}>
                   <option value="">Choose…</option>{prop.options?.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
@@ -46,13 +59,12 @@ export function FilterMenu({ db }: { db: Db }) {
                 <input className="input small grow" aria-label="Value" disabled={!canEdit} type={group === 'number' ? 'number' : group === 'date' ? 'date' : 'text'} value={String(f.value ?? '')}
                   onChange={(e) => update(i, { value: e.target.value === '' ? undefined : group === 'number' ? Number(e.target.value) : e.target.value })} />
               )}
-              {canEdit && <button className="icon-btn" aria-label="Remove filter" onClick={() => setView({ filters: view.filters.filter((_, j) => j !== i) })}><X size={15} /></button>}
+              {canEdit && <button className="icon-btn" aria-label="Remove filter" onClick={() => onChange(filters.filter((_, j) => j !== i))}><X size={15} /></button>}
             </div>
           );
         })}
-        {canEdit && <button className="btn ghost small" style={{ justifySelf: 'start' }} onClick={() => setView({ filters: [...view.filters, { propertyId: 'title', op: 'contains' }] })}><Plus size={15} />Add Filter</button>}
-      </div>
-    </Popover>
+        {canEdit && <button type="button" className="btn ghost small" style={{ justifySelf: 'start' }} onClick={() => onChange([...filters, { propertyId: 'title', op: 'contains' }])}><Plus size={15} />Add Filter</button>}
+    </>
   );
 }
 
@@ -115,7 +127,8 @@ export function PropertyMenu({ db, prop, close }: { db: Db; prop: Property; clos
         <input className="input small" autoFocus aria-label="Property name" defaultValue={prop.name} onBlur={(e) => { const n = e.target.value.trim(); if (n && n !== prop.name) update({ name: n }); }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
         <select className="select small" aria-label="Property type" value={prop.type} onChange={(e) => {
           const type = e.target.value as PropertyType;
-          update({ type, options: hasOptions(type) ? (prop.options ?? (type === 'status' ? [{ id: uid(), name: 'Not started', color: 'gray' }, { id: uid(), name: 'In progress', color: 'blue' }, { id: uid(), name: 'Done', color: 'green' }] : [])) : undefined });
+          if (type === 'rollup' || type === 'formula') { close(); openPropConfig(db.page.id, { ...newPropertyDraft(type, db), id: prop.id, name: prop.name }, false); return; }
+          update({ type, rollup: undefined, formula: undefined, options: hasOptions(type) ? (prop.options ?? (type === 'status' ? [{ id: uid(), name: 'Not started', color: 'gray' }, { id: uid(), name: 'In progress', color: 'blue' }, { id: uid(), name: 'Done', color: 'green' }] : [])) : undefined });
         }}>
           {TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
         </select>
@@ -123,6 +136,18 @@ export function PropertyMenu({ db, prop, close }: { db: Db; prop: Property; clos
           <select className="select small" aria-label="Linked database" value={prop.relationDatabaseId ?? ''} onChange={(e) => update({ relationDatabaseId: e.target.value || undefined })}>
             <option value="">Link to database…</option>{dbs.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || 'Untitled'}</option>)}
           </select>
+        )}
+        {isComputed(prop) && (
+          <button type="button" className="btn small d3-cfg-btn" onClick={() => { close(); openPropConfig(db.page.id, prop, false); }}>
+            <Pencil size={14} /><span className="grow">{configLabel(prop, db)}</span>
+          </button>
+        )}
+        {(prop.type === 'number' || resultKind(prop) === 'number') && (
+          <label className="field"><span>Number format</span>
+            <select className="select small" value={prop.numberFormat ?? 'plain'} onChange={(e) => update({ numberFormat: e.target.value as Property['numberFormat'] })}>
+              {NUMBER_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}{f.sample ? ` (${f.sample})` : ''}</option>)}
+            </select>
+          </label>
         )}
       </div>
       {hasOptions(prop.type) && (
@@ -159,7 +184,7 @@ export function AddProperty({ db }: { db: Db }) {
     <Popover placement="bottom-end" trigger={(p) => <button className="th-btn" style={{ width: 44, justifyContent: 'center' }} aria-label="Add a property" title="Add a property" {...p}><Plus size={16} /></button>}>
       <div className="menu-label">New property</div>
       {TYPES.map((t) => (
-        <MenuItem key={t.type} icon={<PropIcon type={t.type} />} onClick={() => db.setSchema([...db.schema, {
+        <MenuItem key={t.type} icon={<PropIcon type={t.type} />} onClick={() => (t.type === 'rollup' || t.type === 'formula') ? openPropConfig(db.page.id, newPropertyDraft(t.type, db), true) : db.setSchema([...db.schema, {
           id: uid(), name: t.label, type: t.type,
           options: t.type === 'status' ? [{ id: uid(), name: 'Not started', color: 'gray' }, { id: uid(), name: 'In progress', color: 'blue' }, { id: uid(), name: 'Done', color: 'green' }] : hasOptions(t.type) ? [] : undefined,
         }])}>{t.label}</MenuItem>

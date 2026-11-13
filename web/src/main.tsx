@@ -11,6 +11,9 @@ import { PublicPage } from './PublicPage.tsx';
 import { BrowsePage, MorePage, Shell } from './Shell.tsx';
 import { applyStoredPrefs } from './theme.ts';
 import { OAuthConsent } from './OAuthConsent.tsx';
+import { CapturePage } from './inbox/Capture.tsx';
+import { ChangesScreen } from './inbox/Changes.tsx';
+import { NotificationsScreen, PageRedirect } from './inbox/Notifications.tsx';
 import { UiProvider } from './ui.tsx';
 import './styles.css';
 
@@ -44,11 +47,15 @@ function Root() {
     <Routes>
       <Route path="/invite/:token" element={<InvitePage boot={boot.data} />} />
       <Route path="/oauth/consent" element={<OAuthConsent />} />
+      <Route path="/capture" element={<CapturePage />} />
+      <Route path="/p/:pid" element={<PageRedirect />} />
       <Route path="/w/:wid" element={<Shell boot={boot.data} />}>
         <Route index element={<Home />} />
         <Route path="trash" element={<TrashPage />} />
         <Route path="browse" element={<BrowsePage />} />
         <Route path="more" element={<MorePage />} />
+        <Route path="changes" element={<ChangesScreen />} />
+        <Route path="notifications" element={<NotificationsScreen />} />
         <Route path="p/:pid" element={<PageRoute />} />
       </Route>
       <Route path="*" element={home ? <Navigate to={`/w/${home.id}`} replace /> : <Shell boot={boot.data} />} />

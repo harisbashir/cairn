@@ -1,22 +1,26 @@
-import { Extension, mergeAttributes, Node, type Editor as TEditor, type Range } from '@tiptap/core';
+import { Extension, mergeAttributes, Node, type Editor as TEditor } from '@tiptap/core';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { Placeholder } from '@tiptap/extensions';
 import { PluginKey } from '@tiptap/pm/state';
+import { CellSelection } from '@tiptap/pm/tables';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from '@tiptap/suggestion';
 import {
   Bold, Code, Code2, Heading1, Heading2, Heading3, Highlighter, ImageIcon, Italic, Lightbulb, Link2, List, ListChecks,
-  ListOrdered, Minus, Pilcrow, Quote, Strikethrough, FileText,
+  ListOrdered, Minus, Pilcrow, Quote, Strikethrough,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { DocNode, TreeNode } from '../../shared/types.ts';
-import { post } from './api.ts';
+import { post, useWsUsers } from './api.ts';
+import { blockSlashItems, editorBlocks, type MenuItemDef } from './editor/blocks.tsx';
+import { mentionItems, rememberPeople } from './editor/Mentions.tsx';
+import { TableMenu } from './editor/TableMenu.tsx';
 
 export const Callout = Node.create({
   name: 'callout',
@@ -51,9 +55,9 @@ export const PageLink = Node.create({
   },
 });
 
-interface Item { id: string; title: string; desc?: string; icon: ReactNode; run: (editor: TEditor, range: Range) => void }
+type Item = MenuItemDef;
 interface MenuState { kind: 'slash' | 'page'; items: Item[]; index: number; rect: DOMRect | null; pick: (item: Item) => void }
-interface Bridge { set: (updater: (prev: MenuState | null) => MenuState | null) => void; items: (kind: 'slash' | 'page', query: string) => Item[] }
+interface Bridge { get: () => MenuState | null; set: (updater: (prev: MenuState | null) => MenuState | null) => void; items: (kind: 'slash' | 'page', query: string) => Item[] | Promise<Item[]> }
 
 function suggest(kind: 'slash' | 'page', char: string, bridge: { current: Bridge }) {
   return Extension.create({
@@ -76,15 +80,13 @@ function suggest(kind: 'slash' | 'page', char: string, bridge: { current: Bridge
             onExit: () => bridge.current.set(() => null),
             onKeyDown: ({ event }: SuggestionKeyDownProps) => {
               if (event.key === 'Escape') { bridge.current.set(() => null); return true; }
-              let handled = false;
-              bridge.current.set((prev) => {
-                if (!prev || !prev.items.length) return prev;
-                if (event.key === 'ArrowDown') { handled = true; return { ...prev, index: (prev.index + 1) % prev.items.length }; }
-                if (event.key === 'ArrowUp') { handled = true; return { ...prev, index: (prev.index - 1 + prev.items.length) % prev.items.length }; }
-                if (event.key === 'Enter' || event.key === 'Tab') { handled = true; queueMicrotask(() => prev.pick(prev.items[prev.index])); }
-                return prev;
-              });
-              return handled;
+              // Decide synchronously (React may defer state updaters, and Enter must not reach the editor).
+              const prev = bridge.current.get();
+              if (!prev || !prev.items.length) return false;
+              if (event.key === 'ArrowDown') { bridge.current.set(() => ({ ...prev, index: (prev.index + 1) % prev.items.length })); return true; }
+              if (event.key === 'ArrowUp') { bridge.current.set(() => ({ ...prev, index: (prev.index - 1 + prev.items.length) % prev.items.length })); return true; }
+              if (event.key === 'Enter' || event.key === 'Tab') { queueMicrotask(() => prev.pick(prev.items[prev.index])); return true; }
+              return false;
             },
           };
         },
@@ -125,7 +127,7 @@ function pickImage(wid: string): Promise<string | null> {
   });
 }
 
-function slashItems(wid: string): Item[] {
+function slashItems(wid: string, editor: TEditor | null): Item[] {
   const block = (id: string, title: string, desc: string, icon: ReactNode, fn: (c: ReturnType<TEditor['chain']>) => ReturnType<TEditor['chain']>): Item => ({
     id, title, desc, icon, run: (editor, range) => { fn(editor.chain().focus().deleteRange(range)).run(); },
   });
@@ -141,6 +143,7 @@ function slashItems(wid: string): Item[] {
     block('callout', 'Callout', 'Make text stand out', <Lightbulb size={17} />, (c) => c.insertContent({ type: 'callout', content: [{ type: 'paragraph' }] })),
     block('code', 'Code', 'A block of code', <Code2 size={17} />, (c) => c.setCodeBlock()),
     block('divider', 'Divider', 'Separate sections', <Minus size={17} />, (c) => c.setHorizontalRule()),
+    ...blockSlashItems(editor),
     {
       id: 'image', title: 'Image', desc: 'Upload a picture', icon: <ImageIcon size={17} />,
       run: (editor, range) => {
@@ -160,6 +163,8 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
   onChange: (doc: DocNode) => void;
 }) {
   const navigate = useNavigate();
+  const wsUsers = useWsUsers(wid).data;
+  useEffect(() => { if (wsUsers) rememberPeople(wsUsers); }, [wsUsers]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
   const pagesRef = useRef(pages);
@@ -170,22 +175,29 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
   onChangeRef.current = onChange;
 
   const bridge = useRef<Bridge>(null!);
+  const menuRef = useRef<MenuState | null>(null);
   bridge.current = {
-    set: setMenu,
+    get: () => menuRef.current,
+    set: (fn) => { menuRef.current = fn(menuRef.current); setMenu(menuRef.current); },
     items: (kind, query) => {
       const q = query.toLowerCase();
-      if (kind === 'slash') return slashItems(wid).filter((i) => i.title.toLowerCase().includes(q) || i.id.includes(q));
-      return pagesRef.current.filter((p) => (p.title || 'Untitled').toLowerCase().includes(q)).slice(0, 8).map((p) => ({
-        id: p.id, title: p.title || 'Untitled', icon: p.icon ? <span className="emoji">{p.icon}</span> : <FileText size={16} />,
-        run: (editor, range) => { editor.chain().focus().insertContentAt(range, [{ type: 'pageLink', attrs: { pageId: p.id, title: p.title || 'Untitled' } }, { type: 'text', text: ' ' }]).run(); },
-      }));
+      if (kind === 'slash') {
+        const bare = q.replace(/\s+/g, '');
+        return slashItems(wid, editorRef.current).filter((i) => i.title.toLowerCase().includes(q) || i.title.toLowerCase().replace(/\s+/g, '').includes(bare) || i.id.includes(bare));
+      }
+      return mentionItems(wid, query, pagesRef.current);
     },
   };
 
   const extensions = useMemo(() => [
     StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false, autolink: true } }),
     TaskList, TaskItem.configure({ nested: true }), Highlight, Image, Callout, PageLink,
-    Placeholder.configure({ placeholder: ({ node }) => (node.type.name === 'heading' ? 'Heading' : 'Write something, type / for blocks, or @ to link a page') }),
+    ...editorBlocks(),
+    Placeholder.configure({
+      includeChildren: true,
+      // Nested lines get a shorter hint from editor.css (and none inside table cells).
+      placeholder: ({ node }) => (node.type.name === 'heading' ? 'Heading' : node.type.name === 'detailsSummary' ? 'Toggle' : 'Write something, type / for blocks, or @ to mention'),
+    }),
     suggest('slash', '/', bridge), suggest('page', '@', bridge),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], []);
@@ -256,7 +268,7 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
       }}
     >
       {editable && (
-        <BubbleMenu editor={editor} shouldShow={({ editor, state }) => !state.selection.empty && !editor.isActive('codeBlock') && !editor.isActive('image')}>
+        <BubbleMenu editor={editor} shouldShow={({ editor, state }) => !state.selection.empty && !(state.selection instanceof CellSelection) && !editor.isActive('codeBlock') && !editor.isActive('image') && !editor.isActive('databaseView')}>
           {linking !== null ? (
             <form className="bubble" onSubmit={(e) => {
               e.preventDefault();
@@ -280,17 +292,19 @@ export function Editor({ wid, content, version, editable, pages, onChange }: {
           )}
         </BubbleMenu>
       )}
+      {editable && <TableMenu editor={editor} />}
       <EditorContent editor={editor} />
       {menu && menu.rect && menu.items.length > 0 && (
         <div className={`menu ${menu.kind === 'slash' ? 'slash' : ''}`} style={{ position: 'fixed', left: Math.min(menu.rect.left, window.innerWidth - 310), ...(menu.rect.bottom + 330 > window.innerHeight ? { bottom: window.innerHeight - menu.rect.top + 6 } : { top: menu.rect.bottom + 6 }), maxHeight: 320 }}>
-          <div className="menu-label">{menu.kind === 'slash' ? 'Blocks' : 'Link to page'}</div>
-          {menu.items.map((it, i) => (
+          {menu.kind === 'slash' && <div className="menu-label">Blocks</div>}
+          {menu.items.map((it, i) => [
+            menu.kind === 'page' && it.section && it.section !== menu.items[i - 1]?.section && <div key={`s-${it.section}`} className="menu-label">{it.section}</div>,
             <button key={it.id} type="button" className={`menu-item${i === menu.index ? ' active' : ''}`} ref={(el) => { if (el && i === menu.index) el.scrollIntoView({ block: 'nearest' }); }}
               onMouseDown={(e) => { e.preventDefault(); menu.pick(it); }}>
               {menu.kind === 'slash' ? <span className="ico">{it.icon}</span> : it.icon}
               <span className="grow"><div>{it.title}</div>{it.desc && <div className="d">{it.desc}</div>}</span>
-            </button>
-          ))}
+            </button>,
+          ])}
         </div>
       )}
     </div>

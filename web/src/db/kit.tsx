@@ -9,6 +9,8 @@ import type {
 } from '../../../shared/types.ts';
 import { get, useRows } from '../api.ts';
 import { Avatar, Popover } from '../ui.tsx';
+import { fmtNumber, isComputed } from '../db3/format.ts';
+import { ComputedValue, FilesEditor, FilesView, NumberInput, RowMarks } from '../db3/Values.tsx';
 
 export type WsUser = { id: string; name: string; color: string };
 export const COLORS: OptionColor[] = ['gray', 'brown', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'red'];
@@ -16,6 +18,7 @@ export const TYPES: { type: PropertyType; label: string }[] = [
   { type: 'text', label: 'Text' }, { type: 'number', label: 'Number' }, { type: 'select', label: 'Select' },
   { type: 'multi_select', label: 'Multi-select' }, { type: 'status', label: 'Status' }, { type: 'date', label: 'Date' },
   { type: 'checkbox', label: 'Checkbox' }, { type: 'url', label: 'Link' }, { type: 'person', label: 'Person' }, { type: 'relation', label: 'Relation' },
+  { type: 'files', label: 'Files' }, { type: 'rollup', label: 'Rollup' }, { type: 'formula', label: 'Formula' },
 ];
 export const hasOptions = (t: PropertyType) => t === 'select' || t === 'multi_select' || t === 'status';
 export const isMulti = (t: PropertyType) => t === 'multi_select' || t === 'person' || t === 'relation';
@@ -43,6 +46,9 @@ export function PropValueView({ prop, value, users, relTitles }: { prop: Propert
     case 'multi_select': return <>{(value as string[]).map((id) => { const o = opt(id); return o ? <Chip key={id} opt={o} /> : null; })}</>;
     case 'checkbox': return value ? <span className="row" style={{ gap: 4 }}><Check size={14} />{prop.name}</span> : null;
     case 'date': return <span>{fmtDate(String(value))}</span>;
+    case 'number': return <span className="d3-num">{typeof value === 'number' ? fmtNumber(value, prop.numberFormat) : String(value)}</span>;
+    case 'files': return <FilesView value={value} />;
+    case 'rollup': case 'formula': return <ComputedValue prop={prop} value={value} />;
     case 'url': return <a href={String(value)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{String(value).replace(/^https?:\/\//, '')}</a>;
     case 'person': return <>{(value as string[]).map((id) => { const u = users.find((x) => x.id === id); return u ? <span key={id} className="row" style={{ gap: 4 }}><Avatar name={u.name} color={u.color} />{u.name}</span> : null; })}</>;
     case 'relation': {
@@ -54,13 +60,21 @@ export function PropValueView({ prop, value, users, relTitles }: { prop: Propert
 }
 
 /** Editable value, used in table cells and on a row's own page. */
-export function PropValueEditor({ prop, value, editable, users, wid, onChange, onAddOption }: {
+export function PropValueEditor({ prop, value, editable, users, wid, onChange, onAddOption, marks }: {
   prop: Property; value: PropValue; editable: boolean; users: WsUser[]; wid: string;
   onChange: (v: PropValue) => void; onAddOption?: (name: string) => SelectOption;
+  /** Shown after a date value (repeat / reminder marks). */
+  marks?: ReactNode;
 }) {
   const rel = useRows(prop.type === 'relation' ? prop.relationDatabaseId : undefined);
   const relTitles = useMemo(() => new Map((rel.data ?? []).map((r) => [r.id, r.title || 'Untitled'])), [rel.data]);
-  if (!editable) return <div className="cell"><PropValueView prop={prop} value={value} users={users} relTitles={relTitles} /></div>;
+  if (isComputed(prop)) {
+    const numeric = typeof value === 'number';
+    return <div className={`cell d3-ro${numeric ? ' d3-right' : ''}`} title={`${prop.name} is calculated`}><ComputedValue prop={prop} value={value} /></div>;
+  }
+  if (!editable) return <div className={`cell${prop.type === 'number' ? ' d3-right' : ''}`}><PropValueView prop={prop} value={value} users={users} relTitles={relTitles} />{prop.type === 'date' && value ? marks : null}</div>;
+  if (prop.type === 'files') return <FilesEditor prop={prop} value={value} wid={wid} onChange={onChange} />;
+  if (prop.type === 'number' && prop.numberFormat && prop.numberFormat !== 'plain') return <NumberInput prop={prop} value={value} onChange={onChange} />;
 
   if (prop.type === 'text' || prop.type === 'url' || prop.type === 'number') {
     return (
@@ -80,7 +94,8 @@ export function PropValueEditor({ prop, value, editable, users, wid, onChange, o
     return <label className="cell"><input type="checkbox" checked={!!value} aria-label={prop.name} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} /></label>;
   }
   if (prop.type === 'date') {
-    return <input className={`cell-input${value ? '' : ' blank'}`} type="date" aria-label={prop.name} value={value ? String(value).slice(0, 10) : ''} onChange={(e) => onChange(e.target.value || null)} />;
+    const input = <input className={`cell-input${value ? '' : ' blank'}`} type="date" aria-label={prop.name} value={value ? String(value).slice(0, 10) : ''} onChange={(e) => onChange(e.target.value || null)} />;
+    return marks && value ? <div className="d3-datewrap">{input}<span className="d3-marks">{marks}</span></div> : input;
   }
 
   const multi = isMulti(prop.type);
@@ -140,7 +155,8 @@ export interface Db {
   rowHref: (rowId: string) => string;
   setSchema: (s: Property[]) => void; setView: (patch: Partial<View>) => void;
   patchRow: (id: string, body: { title?: string; props?: Props }) => void;
-  addRow: (props?: Props) => Promise<Row | null>;
+  /** templateId: undefined = the database's default template, null = blank. */
+  addRow: (props?: Props, templateId?: string | null) => Promise<Row | null>;
   moveRow: (id: string, afterId: string | null) => void;
   addOption: (propId: string, name: string) => SelectOption;
 }
@@ -160,6 +176,12 @@ export function markerColor(id: string): OptionColor {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return MARKER_COLORS[h % MARKER_COLORS.length];
+}
+
+/** The date property that carries a row's repeat / reminder marks: the repeat's date, else the first date. */
+export function marksProp(schema: Property[], row: Row): string | undefined {
+  const r = (row as Row & { repeat?: { dateProp?: string } | null }).repeat;
+  return r?.dateProp ?? schema.find((p) => p.type === 'date')?.id;
 }
 
 export const isEmptyValue = (v: PropValue | undefined) => v === null || v === undefined || v === '' || v === false || (Array.isArray(v) && !v.length);
@@ -188,10 +210,16 @@ export function CardMeta({ row, db, skip }: { row: Row; db: Db; skip?: string })
       ids.slice(0, 2).forEach((id) => nodes.push(<span key={p.id + id} className={`marker ${markerColor(id)}`} title={p.name}>{db.relTitles.get(id) ?? '…'}</span>));
       if (ids.length > 2) nodes.push(<span key={p.id + 'more'} className="meta-text" title={p.name}>+{ids.length - 2}</span>);
     } else if (p.type === 'date') {
-      nodes.push(<span key={p.id} className="meta-text" title={p.name}><Calendar size={12} />{fmtDate(String(v))}</span>);
+      nodes.push(<span key={p.id} className="meta-text" title={p.name}><Calendar size={12} />{fmtDate(String(v))}{p.id === marksProp(db.schema, row) && <RowMarks row={row as never} />}</span>);
+    } else if (p.type === 'files') {
+      nodes.push(<FilesView key={p.id} value={v ?? null} compact />);
+    } else if (isComputed(p)) {
+      nodes.push(<ComputedValue key={p.id} prop={p} value={v ?? null} compact />);
+    } else if (p.type === 'number') {
+      nodes.push(<span key={p.id} className="meta-text" title={p.name}>{p.name} {typeof v === 'number' ? fmtNumber(v, p.numberFormat) : String(v)}</span>);
     } else if (p.type === 'person') {
       (v as string[]).forEach((id) => { const u = db.users.find((x) => x.id === id); if (u) nodes.push(<span key={p.id + id} title={`${p.name}: ${u.name}`}><Avatar name={u.name} color={u.color} /></span>); });
-    } else if (p.type === 'text' || p.type === 'url' || p.type === 'number') {
+    } else if (p.type === 'text' || p.type === 'url') {
       nodes.push(<span key={p.id} className="meta-text clip" title={p.name}>{String(v)}</span>);
     } else {
       nodes.push(<PropValueView key={p.id} prop={p} value={v ?? null} users={db.users} relTitles={db.relTitles} />);

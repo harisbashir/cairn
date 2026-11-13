@@ -32,7 +32,7 @@ describe('instance backups', () => {
     expect(Object.keys(entries)).toEqual(expect.arrayContaining(['cairn.db', 'manifest.json', 'files/nested/hello.txt']));
     expect(strFromU8(entries['files/nested/hello.txt'])).toBe('hello');
     expect(JSON.parse(strFromU8(entries['manifest.json'])).counts.users).toBe(1);
-    expect(JSON.parse(strFromU8(entries['manifest.json'])).version).toBe('0.2.0');
+    expect(JSON.parse(strFromU8(entries['manifest.json'])).version).toBe('0.3.0');
     s.put('users', { id: 'after', name: 'After' }); s.close();
     await restoreBackup(output, dir);
     const restored = new Store(dir); stores.push(restored);

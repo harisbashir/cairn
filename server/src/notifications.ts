@@ -215,7 +215,7 @@ export class Notifications {
       at: this.clock().toISOString(),
       kind,
       title: page.title,
-      body: text,
+      body: text.replace(/@\[([^\]]*)\]\(cairn:\/\/(?:user|date)\/[^)]*\)/g, '@$1').slice(0, 500),
       pageId: page.id,
       workspaceId: page.workspaceId,
       actorName: actor?.user.name ?? '',

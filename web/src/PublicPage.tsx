@@ -11,11 +11,13 @@ import type { Page, Row } from '../../shared/types.ts';
 import { get } from './api.ts';
 import { PropValueView } from './Database.tsx';
 import { Callout, PageLink } from './Editor.tsx';
+import { readOnlyBlocks } from './editor/blocks.tsx';
+import './editor/editor.css';
 
 function ReadOnlyDoc({ page, token }: { page: Page; token: string }) {
   const editor = useEditor({
     editable: false,
-    extensions: [StarterKit, TaskList, TaskItem, Highlight, Image, Callout, PageLink],
+    extensions: [StarterKit, TaskList, TaskItem, Highlight, Image, Callout, PageLink, ...readOnlyBlocks()],
     content: withShare(page.content, token) ?? undefined,
   });
   return <EditorContent editor={editor} />;

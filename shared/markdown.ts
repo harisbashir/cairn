@@ -176,7 +176,7 @@ function block(node: DocNode): string {
       return rows.join('\n');
     }
     case 'databaseView':
-      return `[Linked view: ${escapeLabel(String(node.attrs?.title ?? ''))}](cairn://page/${String(node.attrs?.databaseId ?? '')}${node.attrs?.viewId ? '?view=' + encodeURIComponent(String(node.attrs.viewId)) : ''})`;
+      return `[Linked view${node.attrs?.title ? ': ' + escapeLabel(String(node.attrs.title)) : ''}](cairn://page/${String(node.attrs?.databaseId ?? '')}${node.attrs?.viewId ? '?view=' + encodeURIComponent(String(node.attrs.viewId)) : ''})`;
     case 'paragraph':
       return children.length ? children.map(inline).join('') : '<p></p>';
     case 'heading':
